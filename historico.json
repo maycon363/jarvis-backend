@@ -1,0 +1,14 @@
+[
+  {
+    "role": "user",
+    "content": "Boa tarde Jarvis"
+  },
+  {
+    "role": "assistant",
+    "content": "Boa tarde, senhor Maycon! É um prazer estar à sua disposição. Como posso ajudá-lo hoje? Algum desafio tecnológico para superar ou talvez uma questão mais... espiritual? Estou aqui para oferecer minha assistência e, quem sabe, um pouco de sarcasmo britânico para alegrar o dia. Como está o senhor hoje?"
+  },
+  {
+    "role": "user",
+    "content": "você está bem Jarvis"
+  }
+]

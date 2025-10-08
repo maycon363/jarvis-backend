@@ -1,0 +1,28 @@
+# Ignorar arquivo de variáveis de ambiente
+.env
+
+# Dependências node_modules
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Diretórios temporários
+tmp/
+temp/
+
+# Arquivos de build (se usar build)
+dist/
+build/
+
+# IDEs e editores
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
