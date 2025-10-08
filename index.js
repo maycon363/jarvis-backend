@@ -7,12 +7,22 @@ const http = require('http');
 const Conversa = require('./models/Historico');
 const { Server } = require('socket.io');
 require('dotenv').config();
+const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
+
 
 const app = express();
 const server = http.createServer(app); // Servidor HTTP
 const io = new Server(server, {
   cors: { origin: '*' }
 });
+
+// store de sessões em memória (uso para WS e API em modo público)
+const sessionStore = {}; // { [sessionId]: { messages: [{role,content,timestamp}], lastSeen: Date } }
+
+// configuração de limites
+const MAX_MESSAGES_PER_SESSION = 40;
+const SESSION_TTL_MS = 1000 * 60 * 30; // 30 minutos
+
 
 const mongoose = require('mongoose');
 mongoose.connect(process.env.MONGO_URI)
@@ -34,7 +44,7 @@ async function carregarHistorico() {
     if (process.env.MONGO_URI) {
       const conversa = await Conversa.findOne({ usuario: 'senhorMaycon' });
       if (conversa) {
-        historicoConversa = conversa.mensagens;
+        historicoConversa = conversa.mensagens.map(({ role, content }) => ({ role, content })); // 🔥 limpa _id
         console.log('📁 Histórico carregado do MongoDB com', historicoConversa.length, 'mensagens');
       } else {
         historicoConversa = [];
@@ -47,6 +57,7 @@ async function carregarHistorico() {
     historicoConversa = [];
   }
 }
+
 
 // chama ao iniciar
 carregarHistorico();
@@ -126,7 +137,7 @@ async function gerarRespostaSocket(pergunta, historico) {
         Evite desperdício de tokens: resuma, foque no essencial e entregue respostas otimizadas, especialmente em comandos rápidos ou objetivos.
       `
     },
-    ...historico,
+    ...historico.map(({ role, content }) => ({ role, content })), // 🔥 limpa os campos extra
     { role: 'user', content: pergunta }
   ];
 
@@ -157,20 +168,46 @@ async function gerarRespostaSocket(pergunta, historico) {
 // === ENDPOINTS HTTP ===
 
 app.post('/api/chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, sessionId } = req.body;
 
   if (!message || typeof message !== 'string') {
-    return res.status(400).json({ reply: 'Por favor, envie uma mensagem válida, pois essa mensagem não consigo responder, senhor Maycon.' });
+    return res.status(400).json({ reply: 'Por favor, envie uma mensagem válida, senhor Maycon.' });
   }
 
+  // se estiver em modo público, usamos sessionStore; se não, usamos encontrarResposta (que usa Mongo/historicoConversa)
   try {
-    const resposta = await encontrarResposta(message);
-    res.json({ reply: resposta });
-  } catch (error) {
-    console.error('Erro no /api/chat:', error);
-    res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
+    if (PUBLIC_MODE) {
+      // garanta sessionId
+      const sid = sessionId || `anon_${req.ip}_${Date.now()}`;
+      if (!sessionStore[sid]) {
+        sessionStore[sid] = { messages: [], lastSeen: Date.now() };
+      }
+
+      const sess = sessionStore[sid];
+
+      // push user message com timestamp
+      sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
+      // mantém só as últimas N mensagens
+      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) {
+        sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
+      }
+
+      // chama a função que usa histórico (adaptada para receber 'historico' array)
+      const reply = await gerarRespostaSocket(message, sess.messages);
+      sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
+      sess.lastSeen = Date.now();
+
+      return res.json({ reply, sessionId: sid });
+    } else {
+      const resposta = await gerarRespostaSocket(message, historicoConversa);
+      return res.json({ reply: resposta });
+    }
+  } catch (err) {
+    console.error('Erro no /api/chat:', err);
+    return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
   }
 });
+
 
 app.post('/api/resetar', async (req, res) => {
   historicoConversa = [];
@@ -188,6 +225,10 @@ app.post('/api/resetar', async (req, res) => {
 
 app.post('/api/ensinar', (req, res) => {
   const { pergunta, resposta } = req.body;
+
+  if (PUBLIC_MODE) {
+    return res.status(403).json({ msg: 'Modo demo: ensinar desabilitado.' });
+  }
 
   if (!pergunta || !resposta) {
     return res.status(400).json({ msg: "Envie 'pergunta' e 'resposta' válidas." });
@@ -228,3 +269,13 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT} com WebSocket ativo`);
 });
+
+// limpeza periódica de sessões inativas para liberar memória
+setInterval(() => {
+  const now = Date.now();
+  for (const sid of Object.keys(sessionStore)) {
+    if (now - sessionStore[sid].lastSeen > SESSION_TTL_MS) {
+      delete sessionStore[sid];
+    }
+  }
+}, 1000 * 60 * 5); // roda a cada 5 minutos
