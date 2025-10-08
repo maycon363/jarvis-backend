@@ -199,6 +199,10 @@ app.post('/api/ensinar', (req, res) => {
   res.json({ msg: "Nova resposta adicionada com sucesso!" });
 });
 
+app.get('/', (req, res) => {
+  res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.');
+});
+
 // === WEBSOCKET INTEGRADO ===
 const historicos = {};
 
