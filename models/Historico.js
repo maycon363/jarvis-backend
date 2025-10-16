@@ -1,3 +1,4 @@
+// backend/models/Historico.js
 const mongoose = require('mongoose');
 
 const MensagemSchema = new mongoose.Schema({
