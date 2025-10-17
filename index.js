@@ -1,4 +1,4 @@
-  // backend/index.js
+// backend/index.js
 const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
@@ -72,21 +72,22 @@ function respostasDinamicas(pergunta) {
   }
 
   const atalhos = {
+    // Web/Desktop Links (fallbacks)
     "google": "https://www.google.com",
     "linkedin": "https://www.linkedin.com",
-    "youtube": "https://www.youtube.com",
+    "youtube": "vnd.youtube://", // mobile: abre app
     "github": "https://www.github.com",
-    "calculadora": "calc://",
-    "whatsapp": "https://web.whatsapp.com",
-    "instagram": "https://www.instagram.com",
-    "facebook": "https://www.facebook.com",
-    "spotify": "https://open.spotify.com",
-    "netflix": "https://www.netflix.com",
+    "calculadora": "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
+    "whatsapp": "whatsapp://send?text=Olá",
+    "instagram": "instagram://user?username=seu_usuario",
+    "facebook": "fb://",
+    "spotify": "spotify://",
+    "netflix": "nflx://", // Netflix app
     "chatgpt": "https://chat.openai.com",
-    "twitch": "https://www.twitch.tv",
-    "notion": "https://www.notion.so",
-    "gmail": "https://mail.google.com",
-    "figma": "https://www.figma.com",
+    "twitch": "twitch://",
+    "notion": "notion://",
+    "gmail": "mailto:seuemail@gmail.com",
+    "figma": "figma://",
     "canva": "https://www.canva.com"
   };
 
@@ -134,12 +135,12 @@ async function gerarRespostaSocket(pergunta, historico) {
       `
     },
     ...historico.map(({ role, content }) => ({ role, content })), // 🔥 limpa os campos extra
-    { role: 'user', content: pergunta }  
+    { role: 'user', content: pergunta }
   ];
 
   try {
     const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',                     
+      'https://api.groq.com/openai/v1/chat/completions',
       {
         model: 'llama-3.3-70b-versatile',
         messages: mensagens,
@@ -219,22 +220,7 @@ app.post('/api/resetar', async (req, res) => {
   res.json({ msg: 'Memória de curto prazo apagada com sucesso, senhor Maycon.' });
 });
 
-app.post('/api/ensinar', (req, res) => {
-  const { pergunta, resposta } = req.body;
 
-  if (PUBLIC_MODE) {
-    return res.status(403).json({ msg: 'Modo demo: ensinar desabilitado.' });
-  }
-
-  if (!pergunta || !resposta) {
-    return res.status(400).json({ msg: "Envie 'pergunta' e 'resposta' válidas." });
-  }
-
-  respostas.push({ keywords: [pergunta.toLowerCase()], response: resposta });
-  fs.writeFileSync('respostas.json', JSON.stringify(respostas, null, 2), 'utf-8');
-
-  res.json({ msg: "Nova resposta adicionada com sucesso!" });
-});
 
 app.get('/', (req, res) => {
   res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.');
