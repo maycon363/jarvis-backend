@@ -8,22 +8,21 @@ const http = require('http');
 const Conversa = require('./models/Historico');
 const { Server } = require('socket.io');
 require('dotenv').config();
+
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 
-
 const app = express();
-const server = http.createServer(app); // Servidor HTTP
+const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' }
 });
 
-// store de sessões em memória (uso para WS e API em modo público)
-const sessionStore = {}; // { [sessionId]: { messages: [{role,content,timestamp}], lastSeen: Date } }
+// store de sessões em memória
+const sessionStore = {};
 
 // configuração de limites
 const MAX_MESSAGES_PER_SESSION = 40;
 const SESSION_TTL_MS = 1000 * 60 * 30; // 30 minutos
-
 
 const mongoose = require('mongoose');
 mongoose.connect(process.env.MONGO_URI)
@@ -45,7 +44,7 @@ async function carregarHistorico() {
     if (process.env.MONGO_URI) {
       const conversa = await Conversa.findOne({ usuario: 'senhorMaycon' });
       if (conversa) {
-        historicoConversa = conversa.mensagens.map(({ role, content }) => ({ role, content })); // 🔥 limpa _id
+        historicoConversa = conversa.mensagens.map(({ role, content }) => ({ role, content }));
         console.log('📁 Histórico carregado do MongoDB com', historicoConversa.length, 'mensagens');
       } else {
         historicoConversa = [];
@@ -60,9 +59,8 @@ async function carregarHistorico() {
 }
 
 
-// chama ao iniciar
 carregarHistorico();
-// Função de respostas dinâmicas
+
 function respostasDinamicas(pergunta) {
   const texto = pergunta.toLowerCase();
 
@@ -72,17 +70,16 @@ function respostasDinamicas(pergunta) {
   }
 
   const atalhos = {
-    // Web/Desktop Links (fallbacks)
     "google": "https://www.google.com",
     "linkedin": "https://www.linkedin.com",
-    "youtube": "vnd.youtube://", // mobile: abre app
+    "youtube": "vnd.youtube://",
     "github": "https://www.github.com",
     "calculadora": "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
     "whatsapp": "whatsapp://send?text=Olá",
     "instagram": "instagram://user?username=seu_usuario",
     "facebook": "fb://",
     "spotify": "spotify://",
-    "netflix": "nflx://", // Netflix app
+    "netflix": "nflx://",
     "chatgpt": "https://chat.openai.com",
     "twitch": "twitch://",
     "notion": "notion://",
@@ -91,23 +88,20 @@ function respostasDinamicas(pergunta) {
     "canva": "https://www.canva.com"
   };
 
-  // Lista de verbos de intenção que indicam "abrir", "acessar", "tocar", etc.
   const intencaoRegex = /\b(abrir|acessar|entrar|ir para|abrir o|abre|abrir no|quero abrir|tocar|toca)\b/;
 
   for (const chave in atalhos) {
     const chaveRegex = new RegExp(`\\b${chave}\\b`, 'i');
 
-    // Só ativa se houver uma intenção clara + a palavra-chave
     if (intencaoRegex.test(texto) && chaveRegex.test(texto)) {
       return `Abrindo ${chave}: ${atalhos[chave]}`;
     }
   }
-
   return null;
 }
 
-// Lógica de resposta principal (Groq + histórico)
 async function gerarRespostaSocket(pergunta, historico) {
+  // ... (Lógica Groq e Respostas Dinâmicas MANTIDAS)
   const texto = pergunta.toLowerCase();
   const dinamica = respostasDinamicas(texto);
   if (dinamica) return dinamica;
@@ -121,20 +115,20 @@ async function gerarRespostaSocket(pergunta, historico) {
     {
       role: 'system',
       content: `
-        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educada e extremamente inteligente.
-        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
-        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
-        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
-        Evite floreios, rodeios ou explicações desnecessárias.
-        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
-        Fale em português do Brasil, com linguagem natural.  
-        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
-        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
-        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
-        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
-      `
+        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educada e extremamente inteligente.
+        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
+        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
+        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
+        Evite floreios, rodeios ou explicações desnecessárias.
+        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
+        Fale em português do Brasil, com linguagem natural.  
+        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
+        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
+        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
+        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
+      `
     },
-    ...historico.map(({ role, content }) => ({ role, content })), // 🔥 limpa os campos extra
+    ...historico.map(({ role, content }) => ({ role, content })),
     { role: 'user', content: pergunta }
   ];
 
@@ -162,6 +156,7 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
+
 // === ENDPOINTS HTTP ===
 
 app.post('/api/chat', async (req, res) => {
@@ -171,40 +166,46 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ reply: 'Por favor, envie uma mensagem válida, senhor Maycon.' });
   }
 
-  // se estiver em modo público, usamos sessionStore; se não, usamos encontrarResposta (que usa Mongo/historicoConversa)
   try {
+    let reply = '';
+    let sid = sessionId;
+
     if (PUBLIC_MODE) {
-      // garanta sessionId
-      const sid = sessionId || `anon_${req.ip}_${Date.now()}`;
+      // Lógica de Modo Público (mantida)
+      sid = sessionId || `anon_${req.ip}_${Date.now()}`;
       if (!sessionStore[sid]) {
         sessionStore[sid] = { messages: [], lastSeen: Date.now() };
       }
 
       const sess = sessionStore[sid];
-
-      // push user message com timestamp
       sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
-      // mantém só as últimas N mensagens
       if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) {
         sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
       }
 
-      // chama a função que usa histórico (adaptada para receber 'historico' array)
-      const reply = await gerarRespostaSocket(message, sess.messages);
+      reply = await gerarRespostaSocket(message, sess.messages);
       sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
       sess.lastSeen = Date.now();
 
-      return res.json({ reply, sessionId: sid });
     } else {
-      const resposta = await gerarRespostaSocket(message, historicoConversa);
-      return res.json({ reply: resposta });
+      // Lógica de Modo Privado (mantida)
+      reply = await gerarRespostaSocket(message, historicoConversa);
     }
+
+    // O backend AGORA retorna apenas o texto. Sem audioBase64.
+    return res.json({
+      reply: reply,
+      sessionId: sid,
+      // audioBase64: null 
+    });
+
   } catch (err) {
     console.error('Erro no /api/chat:', err);
     return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
   }
 });
 
+// ... (O resto do código é o mesmo: /api/resetar, /, WebSocket, etc.)
 
 app.post('/api/resetar', async (req, res) => {
   historicoConversa = [];
@@ -219,7 +220,6 @@ app.post('/api/resetar', async (req, res) => {
 
   res.json({ msg: 'Memória de curto prazo apagada com sucesso, senhor Maycon.' });
 });
-
 
 
 app.get('/', (req, res) => {
@@ -242,7 +242,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    delete historicos[socket.id]; // limpa da memória
+    delete historicos[socket.id];
   });
 });
 
@@ -260,4 +260,4 @@ setInterval(() => {
       delete sessionStore[sid];
     }
   }
-}, 1000 * 60 * 5); // roda a cada 5 minutos
+}, 1000 * 60 * 5);
