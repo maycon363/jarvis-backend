@@ -7,6 +7,7 @@ const axios = require('axios');
 const http = require('http');
 const Conversa = require('./models/Historico');
 const { Server } = require('socket.io');
+const { getGoogleTtsAudioUrl } = require('./googleTts');
 require('dotenv').config();
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
@@ -57,7 +58,6 @@ async function carregarHistorico() {
     historicoConversa = [];
   }
 }
-
 
 carregarHistorico();
 
@@ -115,18 +115,18 @@ async function gerarRespostaSocket(pergunta, historico) {
     {
       role: 'system',
       content: `
-        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educada e extremamente inteligente.
-        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
-        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
-        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
-        Evite floreios, rodeios ou explicações desnecessárias.
-        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
-        Fale em português do Brasil, com linguagem natural.  
-        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
-        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
-        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
-        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
-      `
+        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educada e extremamente inteligente.
+        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
+        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
+        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
+        Evite floreios, rodeios ou explicações desnecessárias.
+        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
+        Fale em português do Brasil, com linguagem natural.  
+        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
+        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
+        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.           
+        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
+      `
     },
     ...historico.map(({ role, content }) => ({ role, content })),
     { role: 'user', content: pergunta }
@@ -139,7 +139,7 @@ async function gerarRespostaSocket(pergunta, historico) {
         model: 'llama-3.3-70b-versatile',
         messages: mensagens,
         temperature: 0.7,
-        max_tokens: 600
+        max_tokens: 100
       },
       {
         headers: {
@@ -155,8 +155,6 @@ async function gerarRespostaSocket(pergunta, historico) {
     return "Tive um problema técnico ao acessar minha base de conhecimento, senhor Maycon.";
   }
 }
-
-
 // === ENDPOINTS HTTP ===
 
 app.post('/api/chat', async (req, res) => {
@@ -169,39 +167,28 @@ app.post('/api/chat', async (req, res) => {
   try {
     let reply = '';
     let sid = sessionId;
+    
+    // 1. Gera a resposta de texto (Groq)
+    reply = await gerarRespostaSocket(message, /* historico */);
+    
+    // 2. Tenta gerar o áudio com qualidade (Google Translate TTS)
+    const audioBase64 = await getGoogleTtsAudioUrl(reply); 
+    // Se a resposta for muito longa ou a chamada falhar, audioBase64 será null.
 
-    if (PUBLIC_MODE) {
-      // Lógica de Modo Público (mantida)
-      sid = sessionId || `anon_${req.ip}_${Date.now()}`;
-      if (!sessionStore[sid]) {
-        sessionStore[sid] = { messages: [], lastSeen: Date.now() };
-      }
-
-      const sess = sessionStore[sid];
-      sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
-      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) {
-        sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
-      }
-
-      reply = await gerarRespostaSocket(message, sess.messages);
-      sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
-      sess.lastSeen = Date.now();
-
-    } else {
-      // Lógica de Modo Privado (mantida)
-      reply = await gerarRespostaSocket(message, historicoConversa);
-    }
-
-    // O backend AGORA retorna apenas o texto. Sem audioBase64.
+    // 3. Retorna a resposta completa
     return res.json({
-      reply: reply,
-      sessionId: sid,
-      // audioBase64: null 
+        reply: reply,
+        sessionId: sid,
+        // audioBase64 será o MP3 real ou null
+        audioBase64: audioBase64 
     });
 
   } catch (err) {
-    console.error('Erro no /api/chat:', err);
-    return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
+    // ... (tratamento de erro) ...
+    return res.status(500).json({ 
+      reply: 'Ocorreu um erro de chat, senhor Maycon. Tentando modo de emergência.', 
+      audioBase64: null 
+    });
   }
 });
 
@@ -244,6 +231,24 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     delete historicos[socket.id];
   });
+});
+
+app.get('/api/test-tts', async (req, res) => {
+    const testText = "Olá senhor Maycon. Se você ouvir esta voz, o Google TTS está funcionando.";
+    console.log("TESTE TTS: Tentando gerar áudio...");
+    
+    // Certifique-se de que a função foi importada corretamente:
+    const { getGoogleTtsAudioUrl } = require('./googleTts'); 
+    
+    const audioBase64 = await getGoogleTtsAudioUrl(testText);
+
+    if (audioBase64) {
+        console.log("TESTE TTS: SUCESSO! Base64 gerado.");
+        res.json({ success: true, audioBase64: audioBase64 });
+    } else {
+        console.log("TESTE TTS: FALHA ao gerar Base64. Verifique os logs de erro.");
+        res.status(500).json({ success: false, message: 'Falha ao obter áudio do Google TTS. Verifique logs.' });
+    }
 });
 
 // === INICIA SERVIDOR ===
