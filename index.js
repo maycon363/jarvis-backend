@@ -8,8 +8,6 @@ const axios = require('axios');
 const http = require('http');
 const Conversa = require('./models/Historico');
 const { Server } = require('socket.io');
-// 🛑 REMOVENDO A IMPORTAÇÃO FALHA:
-// const { getGoogleTtsAudioUrl } = require('./googleTts'); 
 require('dotenv').config();
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
@@ -141,7 +139,7 @@ async function gerarRespostaSocket(pergunta, historico) {
         model: 'llama-3.3-70b-versatile',
         messages: mensagens,
         temperature: 0.7,
-        max_tokens: 100
+        max_tokens: 600
       },
       {
         headers: {
@@ -169,26 +167,26 @@ app.post('/api/chat', async (req, res) => {
   try {
     let reply = '';
     let sid = sessionId;
-    
+
     // 1. Gera a resposta de texto (Groq)
     reply = await gerarRespostaSocket(message, /* historico */);
-    
+
     // 🛑 REMOVENDO A CHAMADA DO GOOGLE TTS PARA EVITAR ERROS 500
     // const audioBase64 = await getGoogleTtsAudioUrl(reply); 
 
     // 3. Retorna a resposta com audioBase64: null para forçar o Frontend a usar o Fallback
     return res.json({
-        reply: reply,
-        sessionId: sid,
-        audioBase64: null // <== Ponto chave: Força o uso da voz nativa
+      reply: reply,
+      sessionId: sid,
+      audioBase64: null // <== Ponto chave: Força o uso da voz nativa
     });
 
   } catch (err) {
-    // Retorna 200 no erro para não quebrar a interface, mas mantém o null
-    console.error('Erro no processamento da rota /api/chat:', err.message);
-    return res.status(200).json({ 
-      reply: 'Ocorreu um erro de chat, senhor Maycon. Tentando modo de emergência.', 
-      audioBase64: null 
+    // 🛑 Retorna o status 500 correto para erro interno
+    console.error('Erro fatal no processamento da rota /api/chat:', err.message);
+    return res.status(500).json({
+      reply: 'Erro interno fatal do JARVIS. Verifique a chave GROQ.',
+      audioBase64: null
     });
   }
 });
@@ -233,13 +231,6 @@ io.on('connection', (socket) => {
     delete historicos[socket.id];
   });
 });
-
-// 🛑 REMOVENDO ROTA DE TESTE (Não é mais necessária)
-/*
-app.get('/api/test-tts', async (req, res) => {
-    // ... (código do teste) ...
-});
-*/
 
 // === INICIA SERVIDOR ===
 const PORT = process.env.PORT || 3001;
