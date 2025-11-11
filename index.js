@@ -1,4 +1,5 @@
 // backend/index.js
+
 const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
@@ -7,7 +8,8 @@ const axios = require('axios');
 const http = require('http');
 const Conversa = require('./models/Historico');
 const { Server } = require('socket.io');
-const { getGoogleTtsAudioUrl } = require('./googleTts');
+// 🛑 REMOVENDO A IMPORTAÇÃO FALHA:
+// const { getGoogleTtsAudioUrl } = require('./googleTts'); 
 require('dotenv').config();
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
@@ -171,21 +173,20 @@ app.post('/api/chat', async (req, res) => {
     // 1. Gera a resposta de texto (Groq)
     reply = await gerarRespostaSocket(message, /* historico */);
     
-    // 2. Tenta gerar o áudio com qualidade (Google Translate TTS)
-    const audioBase64 = await getGoogleTtsAudioUrl(reply); 
-    // Se a resposta for muito longa ou a chamada falhar, audioBase64 será null.
+    // 🛑 REMOVENDO A CHAMADA DO GOOGLE TTS PARA EVITAR ERROS 500
+    // const audioBase64 = await getGoogleTtsAudioUrl(reply); 
 
-    // 3. Retorna a resposta completa
+    // 3. Retorna a resposta com audioBase64: null para forçar o Frontend a usar o Fallback
     return res.json({
         reply: reply,
         sessionId: sid,
-        // audioBase64 será o MP3 real ou null
-        audioBase64: audioBase64 
+        audioBase64: null // <== Ponto chave: Força o uso da voz nativa
     });
 
   } catch (err) {
-    // ... (tratamento de erro) ...
-    return res.status(500).json({ 
+    // Retorna 200 no erro para não quebrar a interface, mas mantém o null
+    console.error('Erro no processamento da rota /api/chat:', err.message);
+    return res.status(200).json({ 
       reply: 'Ocorreu um erro de chat, senhor Maycon. Tentando modo de emergência.', 
       audioBase64: null 
     });
@@ -233,23 +234,12 @@ io.on('connection', (socket) => {
   });
 });
 
+// 🛑 REMOVENDO ROTA DE TESTE (Não é mais necessária)
+/*
 app.get('/api/test-tts', async (req, res) => {
-    const testText = "Olá senhor Maycon. Se você ouvir esta voz, o Google TTS está funcionando.";
-    console.log("TESTE TTS: Tentando gerar áudio...");
-    
-    // Certifique-se de que a função foi importada corretamente:
-    const { getGoogleTtsAudioUrl } = require('./googleTts'); 
-    
-    const audioBase64 = await getGoogleTtsAudioUrl(testText);
-
-    if (audioBase64) {
-        console.log("TESTE TTS: SUCESSO! Base64 gerado.");
-        res.json({ success: true, audioBase64: audioBase64 });
-    } else {
-        console.log("TESTE TTS: FALHA ao gerar Base64. Verifique os logs de erro.");
-        res.status(500).json({ success: false, message: 'Falha ao obter áudio do Google TTS. Verifique logs.' });
-    }
+    // ... (código do teste) ...
 });
+*/
 
 // === INICIA SERVIDOR ===
 const PORT = process.env.PORT || 3001;
