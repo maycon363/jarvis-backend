@@ -118,13 +118,13 @@ async function gerarRespostaSocket(pergunta, historico) {
         Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educada e extremamente inteligente.
         Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
         Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
-        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
+        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.   
         Evite floreios, rodeios ou explicações desnecessárias.
         Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
-        Fale em português do Brasil, com linguagem natural.  
+        Fale em português do Brasil, com linguagem natural.   
         Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
-        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
-        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.           
+        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.   
+        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.          
         Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
       `
     },
@@ -169,23 +169,34 @@ app.post('/api/chat', async (req, res) => {
     let sid = sessionId;
 
     // 1. Gera a resposta de texto (Groq)
-    reply = await gerarRespostaSocket(message, /* historico */);
+    // 🛑 CORRIGIDO: Agora passa o historicoConversa
+    reply = await gerarRespostaSocket(message, historicoConversa);
 
-    // 🛑 REMOVENDO A CHAMADA DO GOOGLE TTS PARA EVITAR ERROS 500
-    // const audioBase64 = await getGoogleTtsAudioUrl(reply); 
+    // 2. Se a Groq responder, atualiza o histórico global
+    historicoConversa.push({ role: 'user', content: message });
+    historicoConversa.push({ role: 'assistant', content: reply });
 
-    // 3. Retorna a resposta com audioBase64: null para forçar o Frontend a usar o Fallback
+    // 3. Persistir o histórico no MongoDB (Se o Mongo estiver disponível)
+    if (process.env.MONGO_URI) {
+        await Conversa.findOneAndUpdate(
+            { usuario: 'senhorMaycon' }, 
+            { $set: { mensagens: historicoConversa } }, 
+            { upsert: true }
+        );
+    }
+
+    // 4. Retorna a resposta
     return res.json({
       reply: reply,
       sessionId: sid,
-      audioBase64: null // <== Ponto chave: Força o uso da voz nativa
+      audioBase64: null // Força o uso da voz nativa
     });
 
   } catch (err) {
-    // 🛑 Retorna o status 500 correto para erro interno
-    console.error('Erro fatal no processamento da rota /api/chat:', err.message);
+    // 🛑 Retorna o status 500 para erro interno e mensagem de diagnóstico
+    console.error('Erro fatal na rota /api/chat. Possível falha na Groq:', err.response?.data || err.message);
     return res.status(500).json({
-      reply: 'Erro interno fatal do JARVIS. Verifique a chave GROQ.',
+      reply: 'Erro fatal de comunicação com a IA, senhor Maycon. Por favor, verifique a chave GROQ.',
       audioBase64: null
     });
   }
@@ -198,6 +209,7 @@ app.post('/api/resetar', async (req, res) => {
 
   if (process.env.MONGO_URI) {
     try {
+      // 🛑 Atualizado para usar o historicoConversa
       await Conversa.findOneAndDelete({ usuario: 'senhorMaycon' });
     } catch (err) {
       console.warn('❌ Não foi possível limpar no MongoDB. Continuando mesmo assim...');
