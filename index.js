@@ -58,16 +58,10 @@ async function carregarHistorico() {
   }
 }
 
-
 carregarHistorico();
 
 function respostasDinamicas(pergunta) {
   const texto = pergunta.toLowerCase();
-
-  const climaRegex = /\b(clima|tempo)\b/;
-  if (climaRegex.test(texto)) {
-    return "Atualmente não tenho acesso a dados climáticos reais, mas em breve terei, senhor Maycon.";
-  }
 
   const atalhos = {
     "google": "https://www.google.com",
@@ -88,17 +82,23 @@ function respostasDinamicas(pergunta) {
     "canva": "https://www.canva.com"
   };
 
-  const intencaoRegex = /\b(abrir|acessar|entrar|ir para|abrir o|abre|abrir no|quero abrir|tocar|toca)\b/;
+  const intencaoRegex = /\b(abrir|acessar|entrar|abre|ir para|tocar|play|iniciar)\b/;
 
   for (const chave in atalhos) {
     const chaveRegex = new RegExp(`\\b${chave}\\b`, 'i');
 
     if (intencaoRegex.test(texto) && chaveRegex.test(texto)) {
-      return `Abrindo ${chave}: ${atalhos[chave]}`;
+      return JSON.stringify({
+        action: "openLink",
+        app: chave,
+        url: atalhos[chave]
+      });
     }
   }
+
   return null;
 }
+
 
 async function gerarRespostaSocket(pergunta, historico) {
   // ... (Lógica Groq e Respostas Dinâmicas MANTIDAS)
@@ -115,18 +115,19 @@ async function gerarRespostaSocket(pergunta, historico) {
     {
       role: 'system',
       content: `
-        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educada e extremamente inteligente.
-        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
-        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
-        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
-        Evite floreios, rodeios ou explicações desnecessárias.
-        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
-        Fale em português do Brasil, com linguagem natural.  
-        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
-        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
-        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
-        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
-      `
+        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educado e extremamente inteligente.
+        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
+        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
+        Tenta entender se é o maycon outra pessoa falando com você.
+        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
+        Evite floreios, rodeios ou explicações desnecessárias.
+        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
+        Fale em português do Brasil, com linguagem natural.  
+        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
+        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
+        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
+        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
+      `
     },
     ...historico.map(({ role, content }) => ({ role, content })),
     { role: 'user', content: pergunta }
@@ -138,7 +139,7 @@ async function gerarRespostaSocket(pergunta, historico) {
       {
         model: 'llama-3.3-70b-versatile',
         messages: mensagens,
-        temperature: 0.7,
+        temperature: 0.9,
         max_tokens: 600
       },
       {
