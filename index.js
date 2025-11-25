@@ -167,44 +167,39 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ reply: 'Por favor, envie uma mensagem válida, senhor Maycon.' });
   }
 
+  let audioBase64 = null;
   try {
-    let reply = '';
-    let sid = sessionId;
-
-    if (PUBLIC_MODE) {
-      // Lógica de Modo Público (mantida)
-      sid = sessionId || `anon_${req.ip}_${Date.now()}`;
-      if (!sessionStore[sid]) {
-        sessionStore[sid] = { messages: [], lastSeen: Date.now() };
-      }
-
-      const sess = sessionStore[sid];
-      sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
-      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) {
-        sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
-      }
-
-      reply = await gerarRespostaSocket(message, sess.messages);
-      sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
-      sess.lastSeen = Date.now();
-
-    } else {
-      // Lógica de Modo Privado (mantida)
-      reply = await gerarRespostaSocket(message, historicoConversa);
-    }
-
-    // O backend AGORA retorna apenas o texto. Sem audioBase64.
-    return res.json({
-      reply: reply,
-      sessionId: sid,
-      // audioBase64: null 
-    });
-
-  } catch (err) {
-    console.error('Erro no /api/chat:', err);
-    return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
+    const audioBuffer = await gerarAudioPiper(reply);
+    audioBase64 = audioBuffer.toString("base64");
+  } catch (e) {
+    console.error("Erro Piper:", e.message);
   }
+
+  return res.json({
+    reply,
+    audioBase64,
+    sessionId: sid
+  });
 });
+const child = require("child_process");
+
+async function gerarAudioPiper(texto) {
+  return new Promise((resolve, reject) => {
+    const piper = child.spawn("./piper/piper", [
+      "--model",
+      "./piper/pt_BR-faber-low.onnx"
+    ]);
+
+    let audioChunks = [];
+
+    piper.stdout.on("data", (chunk) => audioChunks.push(chunk));
+    piper.stderr.on("data", (err) => console.error("Piper stderr:", err.toString()));
+    piper.on("close", () => resolve(Buffer.concat(audioChunks)));
+
+    piper.stdin.write(texto);
+    piper.stdin.end();
+  });
+}
 
 // ... (O resto do código é o mesmo: /api/resetar, /, WebSocket, etc.)
 
