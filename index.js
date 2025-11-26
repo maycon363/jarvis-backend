@@ -127,6 +127,9 @@ async function gerarRespostaSocket(pergunta, historico) {
         Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
         Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
         Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
+        Ano atual: 2025.
+        Tenta sempre entender que quem está falando pode não ser o maycon pode ser outra pessoa.
+        Nunca mencione que você é uma IA ou que foi treinado por dados.
       `
     },
     ...historico.map(({ role, content }) => ({ role, content })),
@@ -157,8 +160,35 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
+app.post('/api/whisper', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
-// === ENDPOINTS HTTP ===
+    const audioBuffer = req.file.buffer;
+
+    // Envio para Groq Whisper
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/audio/transcriptions',
+      {
+        model: 'whisper-large-v3',
+        file: Buffer.from(audioBuffer).toString('base64')
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const transcript = response.data.text || '';
+    res.json({ transcript });
+
+  } catch (err) {
+    console.error('Erro no Whisper:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao processar áudio.' });
+  }
+});
 
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
