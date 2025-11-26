@@ -160,33 +160,31 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+
 app.post('/api/whisper', upload.single('file'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
-
     const audioBuffer = req.file.buffer;
 
-    // Envio para Groq Whisper
     const response = await axios.post(
       'https://api.groq.com/openai/v1/audio/transcriptions',
-      {
-        model: 'whisper-large-v3',
-        file: Buffer.from(audioBuffer).toString('base64')
-      },
+      audioBuffer,
       {
         headers: {
           'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'audio/wav', // ou 'audio/mpeg', depende do tipo enviado
+        },
+        params: {
+          model: 'whisper-1'
         }
       }
     );
 
-    const transcript = response.data.text || '';
-    res.json({ transcript });
-
+    res.json({ text: response.data.text });
   } catch (err) {
-    console.error('Erro no Whisper:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Falha ao processar áudio.' });
+    console.error('Erro ao transcrever:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Falha ao transcrever o áudio.' });
   }
 });
 
