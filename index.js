@@ -127,9 +127,6 @@ async function gerarRespostaSocket(pergunta, historico) {
         Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
         Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
         Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
-        Ano atual: 2025.
-        Tenta sempre entender que quem está falando pode não ser o maycon pode ser outra pessoa.
-        Nunca mencione que você é uma IA ou que foi treinado por dados.
       `
     },
     ...historico.map(({ role, content }) => ({ role, content })),
@@ -160,33 +157,8 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
-const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage() });
 
-app.post('/api/whisper', upload.single('file'), async (req, res) => {
-  try {
-    const audioBuffer = req.file.buffer;
-
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/audio/transcriptions',
-      audioBuffer,
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'audio/wav', // ou 'audio/mpeg', depende do tipo enviado
-        },
-        params: {
-          model: 'whisper-1'
-        }
-      }
-    );
-
-    res.json({ text: response.data.text });
-  } catch (err) {
-    console.error('Erro ao transcrever:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Falha ao transcrever o áudio.' });
-  }
-});
+// === ENDPOINTS HTTP ===
 
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
