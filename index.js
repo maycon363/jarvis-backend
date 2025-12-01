@@ -104,6 +104,7 @@ async function gerarRespostaSocket(pergunta, historico) {
   // ... (Lógica Groq e Respostas Dinâmicas MANTIDAS)
   const texto = pergunta.toLowerCase();
   const dinamica = respostasDinamicas(texto);
+  const agora = new Date().toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "long" });
   if (dinamica) return dinamica;
 
   for (const item of respostas) {
@@ -115,6 +116,7 @@ async function gerarRespostaSocket(pergunta, historico) {
     {
       role: 'system',
       content: `
+        ⚠️ A data e hora atual é: ${agora} Sempre responda perguntas sobre hora usando esse valor.
         Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educado e extremamente inteligente.
         Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
         Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
