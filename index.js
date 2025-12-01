@@ -101,10 +101,13 @@ function respostasDinamicas(pergunta) {
 
 
 async function gerarRespostaSocket(pergunta, historico) {
-  // ... (Lógica Groq e Respostas Dinâmicas MANTIDAS)
   const texto = pergunta.toLowerCase();
   const dinamica = respostasDinamicas(texto);
-  const agora = new Date().toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "long" });
+  const agora = new Date().toLocaleString("pt-BR", { 
+    dateStyle: "full", 
+    timeStyle: "long",
+    timeZone: "America/Sao_Paulo"
+  });
   if (dinamica) return dinamica;
 
   for (const item of respostas) {
@@ -159,9 +162,6 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
-
-// === ENDPOINTS HTTP ===
-
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
 
@@ -174,7 +174,6 @@ app.post('/api/chat', async (req, res) => {
     let sid = sessionId;
 
     if (PUBLIC_MODE) {
-      // Lógica de Modo Público (mantida)
       sid = sessionId || `anon_${req.ip}_${Date.now()}`;
       if (!sessionStore[sid]) {
         sessionStore[sid] = { messages: [], lastSeen: Date.now() };
@@ -191,15 +190,12 @@ app.post('/api/chat', async (req, res) => {
       sess.lastSeen = Date.now();
 
     } else {
-      // Lógica de Modo Privado (mantida)
       reply = await gerarRespostaSocket(message, historicoConversa);
     }
 
-    // O backend AGORA retorna apenas o texto. Sem audioBase64.
     return res.json({
       reply: reply,
       sessionId: sid,
-      // audioBase64: null 
     });
 
   } catch (err) {
@@ -207,8 +203,6 @@ app.post('/api/chat', async (req, res) => {
     return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
   }
 });
-
-// ... (O resto do código é o mesmo: /api/resetar, /, WebSocket, etc.)
 
 app.post('/api/resetar', async (req, res) => {
   historicoConversa = [];
@@ -229,7 +223,6 @@ app.get('/', (req, res) => {
   res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.');
 });
 
-// === WEBSOCKET INTEGRADO ===
 const historicos = {};
 
 io.on('connection', (socket) => {
@@ -249,13 +242,11 @@ io.on('connection', (socket) => {
   });
 });
 
-// === INICIA SERVIDOR ===
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT} com WebSocket ativo`);
 });
 
-// limpeza periódica de sessões inativas para liberar memória
 setInterval(() => {
   const now = Date.now();
   for (const sid of Object.keys(sessionStore)) {
