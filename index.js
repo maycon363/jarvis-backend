@@ -17,6 +17,9 @@ const io = new Server(server, {
   cors: { origin: '*' }
 });
 
+const sttRoute = require("./stt");
+app.use("/api/stt", sttRoute);
+
 // store de sessões em memória
 const sessionStore = {};
 
