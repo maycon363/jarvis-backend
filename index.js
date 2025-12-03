@@ -10,18 +10,22 @@ const mongoose = require('mongoose');
 const Conversa = require('./models/Historico');
 require('dotenv').config();
 
-const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
-
 // --- Inicialização do app ---
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
 
+// --- Para upload de áudio (STT) ---
+const fileUpload = require('express-fileupload');
+app.use(fileUpload());
+
+// --- Servidor HTTP + WebSocket ---
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 // --- Configurações ---
+const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 const MAX_MESSAGES_PER_SESSION = 40;
 const SESSION_TTL_MS = 1000 * 60 * 30; // 30 minutos
 const sessionStore = {}; // Sessões públicas em memória
@@ -172,6 +176,32 @@ app.post('/api/resetar', async (req, res) => {
     catch (err) { console.warn('❌ Não foi possível limpar no MongoDB. Continuando mesmo assim...'); }
   }
   res.json({ msg: 'Memória de curto prazo apagada com sucesso, senhor Maycon.' });
+});
+
+// --- Rota STT (voz → texto) ---
+app.post('/api/stt', async (req, res) => {
+  try {
+    if (!req.files || !req.files.audio) {
+      return res.status(400).json({ error: "Áudio não enviado" });
+    }
+
+    const audioFile = req.files.audio;
+    const FormData = require("form-data");
+    const formData = new FormData();
+    formData.append("file", audioFile.data, audioFile.name);
+    formData.append("model", "whisper-1");
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/audio/transcriptions",
+      formData,
+      { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...formData.getHeaders() } }
+    );
+
+    res.json({ text: response.data.text });
+  } catch (err) {
+    console.error("Erro STT:", err.response?.data || err.message);
+    res.status(500).json({ error: "Erro no reconhecimento de voz" });
+  }
 });
 
 app.get('/', (req, res) => res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.'));
