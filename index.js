@@ -5,41 +5,35 @@ const cors = require('cors');
 const morgan = require('morgan');
 const axios = require('axios');
 const http = require('http');
-const Conversa = require('./models/Historico');
 const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const Conversa = require('./models/Historico');
 require('dotenv').config();
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 
+// --- Inicialização do app ---
 const app = express();
+app.use(cors({ origin: '*' }));
+app.use(express.json());
+app.use(morgan('dev'));
+
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*' }
-});
+const io = new Server(server, { cors: { origin: '*' } });
 
-const sttRoute = require("./stt");
-app.use("/api/stt", sttRoute);
-
-// store de sessões em memória
-const sessionStore = {};
-
-// configuração de limites
+// --- Configurações ---
 const MAX_MESSAGES_PER_SESSION = 40;
 const SESSION_TTL_MS = 1000 * 60 * 30; // 30 minutos
+const sessionStore = {}; // Sessões públicas em memória
+const socketHistories = {}; // Histórico por socket
 
-const mongoose = require('mongoose');
+// --- Conexão com MongoDB ---
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB conectado'))
   .catch((err) => console.error('Erro ao conectar MongoDB:', err));
 
-app.use(cors());
-app.use(express.json());
-app.use(morgan('dev'));
-
-// Carrega respostas fixas
+// --- Carregar respostas fixas ---
 let respostas = JSON.parse(fs.readFileSync('respostas.json', 'utf-8'));
-
-// Histórico de conversa
 let historicoConversa = [];
 
 async function carregarHistorico() {
@@ -49,47 +43,42 @@ async function carregarHistorico() {
       if (conversa) {
         historicoConversa = conversa.mensagens.map(({ role, content }) => ({ role, content }));
         console.log('📁 Histórico carregado do MongoDB com', historicoConversa.length, 'mensagens');
-      } else {
-        historicoConversa = [];
       }
-    } else {
-      historicoConversa = [];
     }
   } catch (err) {
     console.warn('🔌 MongoDB não disponível, rodando em modo anônimo.');
-    historicoConversa = [];
   }
 }
 
 carregarHistorico();
 
+// --- Funções auxiliares ---
 function respostasDinamicas(pergunta) {
   const texto = pergunta.toLowerCase();
 
   const atalhos = {
-    "google": "https://www.google.com",
-    "linkedin": "https://www.linkedin.com",
-    "youtube": "vnd.youtube://",
-    "github": "https://www.github.com",
-    "calculadora": "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
-    "whatsapp": "whatsapp://send?text=Olá",
-    "instagram": "instagram://user?username=seu_usuario",
-    "facebook": "fb://",
-    "spotify": "spotify://",
-    "netflix": "nflx://",
-    "chatgpt": "https://chat.openai.com",
-    "twitch": "twitch://",
-    "notion": "notion://",
-    "gmail": "mailto:seuemail@gmail.com",
-    "figma": "figma://",
-    "canva": "https://www.canva.com"
+    google: "https://www.google.com",
+    linkedin: "https://www.linkedin.com",
+    youtube: "vnd.youtube://",
+    github: "https://www.github.com",
+    calculadora: "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
+    whatsapp: "whatsapp://send?text=Olá",
+    instagram: "instagram://user?username=seu_usuario",
+    facebook: "fb://",
+    spotify: "spotify://",
+    netflix: "nflx://",
+    chatgpt: "https://chat.openai.com",
+    twitch: "twitch://",
+    notion: "notion://",
+    gmail: "mailto:seuemail@gmail.com",
+    figma: "figma://",
+    canva: "https://www.canva.com"
   };
 
   const intencaoRegex = /\b(abrir|acessar|entrar|abre|ir para|tocar|play|iniciar)\b/;
 
   for (const chave in atalhos) {
     const chaveRegex = new RegExp(`\\b${chave}\\b`, 'i');
-
     if (intencaoRegex.test(texto) && chaveRegex.test(texto)) {
       return JSON.stringify({
         action: "openLink",
@@ -102,15 +91,11 @@ function respostasDinamicas(pergunta) {
   return null;
 }
 
-
 async function gerarRespostaSocket(pergunta, historico) {
   const texto = pergunta.toLowerCase();
   const dinamica = respostasDinamicas(texto);
-  const agora = new Date().toLocaleString("pt-BR", { 
-    dateStyle: "full", 
-    timeStyle: "long",
-    timeZone: "America/Sao_Paulo"
-  });
+
+  const agora = new Date().toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "long", timeZone: "America/Sao_Paulo" });
   if (dinamica) return dinamica;
 
   for (const item of respostas) {
@@ -118,25 +103,17 @@ async function gerarRespostaSocket(pergunta, historico) {
     if (todasPresentes) return item.response;
   }
 
+  const sistemaContent = `
+    ⚠️ A data e hora atual é: ${agora}
+    Você é J.A.R.V.I.S., assistente pessoal com personalidade sarcástica (sem ser rude), educado e inteligente.
+    Criador: senhor Maycon, fã do Homem de Ferro e da Marvel.
+    Estilo: direto, prático e conciso; humor britânico sutil; linguagem natural em português do Brasil.
+    Não revele que é uma IA; responda elegantemente se não souber algo.
+    Evite desperdício de tokens: resuma, vá direto ao ponto.
+  `;
+
   const mensagens = [
-    {
-      role: 'system',
-      content: `
-        ⚠️ A data e hora atual é: ${agora} Sempre responda perguntas sobre hora usando esse valor.
-        Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educado e extremamente inteligente.
-        Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
-        Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
-        Tenta entender se é o maycon outra pessoa falando com você.
-        Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
-        Evite floreios, rodeios ou explicações desnecessárias.
-        Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
-        Fale em português do Brasil, com linguagem natural.  
-        Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
-        Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
-        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
-        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
-      `
-    },
+    { role: 'system', content: sistemaContent },
     ...historico.map(({ role, content }) => ({ role, content })),
     { role: 'user', content: pergunta }
   ];
@@ -144,18 +121,8 @@ async function gerarRespostaSocket(pergunta, historico) {
   try {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: mensagens,
-        temperature: 0.9,
-        max_tokens: 600
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
-        }
-      }
+      { model: 'llama-3.3-70b-versatile', messages: mensagens, temperature: 0.9, max_tokens: 600 },
+      { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` } }
     );
 
     return response.data.choices[0].message.content;
@@ -165,9 +132,9 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
+// --- Rotas ---
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
-
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ reply: 'Por favor, envie uma mensagem válida, senhor Maycon.' });
   }
@@ -178,29 +145,20 @@ app.post('/api/chat', async (req, res) => {
 
     if (PUBLIC_MODE) {
       sid = sessionId || `anon_${req.ip}_${Date.now()}`;
-      if (!sessionStore[sid]) {
-        sessionStore[sid] = { messages: [], lastSeen: Date.now() };
-      }
+      if (!sessionStore[sid]) sessionStore[sid] = { messages: [], lastSeen: Date.now() };
 
       const sess = sessionStore[sid];
       sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
-      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) {
-        sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
-      }
+      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
 
       reply = await gerarRespostaSocket(message, sess.messages);
       sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
       sess.lastSeen = Date.now();
-
     } else {
       reply = await gerarRespostaSocket(message, historicoConversa);
     }
 
-    return res.json({
-      reply: reply,
-      sessionId: sid,
-    });
-
+    return res.json({ reply, sessionId: sid });
   } catch (err) {
     console.error('Erro no /api/chat:', err);
     return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
@@ -209,52 +167,37 @@ app.post('/api/chat', async (req, res) => {
 
 app.post('/api/resetar', async (req, res) => {
   historicoConversa = [];
-
   if (process.env.MONGO_URI) {
-    try {
-      await Conversa.findOneAndDelete({ usuario: 'senhorMaycon' });
-    } catch (err) {
-      console.warn('❌ Não foi possível limpar no MongoDB. Continuando mesmo assim...');
-    }
+    try { await Conversa.findOneAndDelete({ usuario: 'senhorMaycon' }); } 
+    catch (err) { console.warn('❌ Não foi possível limpar no MongoDB. Continuando mesmo assim...'); }
   }
-
   res.json({ msg: 'Memória de curto prazo apagada com sucesso, senhor Maycon.' });
 });
 
+app.get('/', (req, res) => res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.'));
 
-app.get('/', (req, res) => {
-  res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.');
-});
-
-const historicos = {};
-
+// --- WebSocket ---
 io.on('connection', (socket) => {
-  historicos[socket.id] = [];
+  socketHistories[socket.id] = [];
 
   socket.on('mensagem', async (mensagem) => {
-    historicos[socket.id].push({ role: 'user', content: mensagem });
-
-    const resposta = await gerarRespostaSocket(mensagem, historicos[socket.id]);
-    historicos[socket.id].push({ role: 'assistant', content: resposta });
-
+    socketHistories[socket.id].push({ role: 'user', content: mensagem });
+    const resposta = await gerarRespostaSocket(mensagem, socketHistories[socket.id]);
+    socketHistories[socket.id].push({ role: 'assistant', content: resposta });
     socket.emit('resposta', resposta);
   });
 
-  socket.on('disconnect', () => {
-    delete historicos[socket.id];
-  });
+  socket.on('disconnect', () => delete socketHistories[socket.id]);
 });
 
+// --- Iniciar servidor ---
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT} com WebSocket ativo`);
-});
+server.listen(PORT, () => console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT} com WebSocket ativo`));
 
+// --- Limpeza de sessões antigas ---
 setInterval(() => {
   const now = Date.now();
   for (const sid of Object.keys(sessionStore)) {
-    if (now - sessionStore[sid].lastSeen > SESSION_TTL_MS) {
-      delete sessionStore[sid];
-    }
+    if (now - sessionStore[sid].lastSeen > SESSION_TTL_MS) delete sessionStore[sid];
   }
 }, 1000 * 60 * 5);
