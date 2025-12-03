@@ -1,11 +1,10 @@
 // backend/stt.js
-
 const express = require("express");
 const axios = require("axios");
 const multer = require("multer");
 const FormData = require("form-data");
-const upload = multer();
 const router = express.Router();
+const upload = multer();
 
 router.post("/", upload.single("audio"), async (req, res) => {
   try {
@@ -18,7 +17,6 @@ router.post("/", upload.single("audio"), async (req, res) => {
       filename: "audio.webm",
       contentType: "audio/webm",
     });
-
     form.append("model", "whisper-large-v3");
     form.append("response_format", "json");
     form.append("language", "pt");
