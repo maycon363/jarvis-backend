@@ -7,36 +7,33 @@ const axios = require('axios');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
-const Conversa = require('./models/Historico');
+const fileUpload = require('express-fileupload');
 require('dotenv').config();
+
+// Model
+const Conversa = require('./models/Historico');
+
+const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 
 // --- Inicialização do app ---
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
-
-// --- Para upload de áudio (STT) ---
-const fileUpload = require('express-fileupload');
 app.use(fileUpload());
 
-// --- Servidor HTTP + WebSocket ---
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
 // --- Configurações ---
-const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 const MAX_MESSAGES_PER_SESSION = 40;
 const SESSION_TTL_MS = 1000 * 60 * 30; // 30 minutos
-const sessionStore = {}; // Sessões públicas em memória
-const socketHistories = {}; // Histórico por socket
+const sessionStore = {};
+const socketHistories = {};
 
-// --- Conexão com MongoDB ---
+// --- MongoDB ---
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB conectado'))
-  .catch((err) => console.error('Erro ao conectar MongoDB:', err));
+  .catch(err => console.error('Erro ao conectar MongoDB:', err));
 
-// --- Carregar respostas fixas ---
+// --- Respostas fixas ---
 let respostas = JSON.parse(fs.readFileSync('respostas.json', 'utf-8'));
 let historicoConversa = [];
 
@@ -46,7 +43,7 @@ async function carregarHistorico() {
       const conversa = await Conversa.findOne({ usuario: 'senhorMaycon' });
       if (conversa) {
         historicoConversa = conversa.mensagens.map(({ role, content }) => ({ role, content }));
-        console.log('📁 Histórico carregado do MongoDB com', historicoConversa.length, 'mensagens');
+        console.log('📁 Histórico carregado do MongoDB:', historicoConversa.length, 'mensagens');
       }
     }
   } catch (err) {
@@ -59,7 +56,6 @@ carregarHistorico();
 // --- Funções auxiliares ---
 function respostasDinamicas(pergunta) {
   const texto = pergunta.toLowerCase();
-
   const atalhos = {
     google: "https://www.google.com",
     linkedin: "https://www.linkedin.com",
@@ -80,7 +76,6 @@ function respostasDinamicas(pergunta) {
   };
 
   const intencaoRegex = /\b(abrir|acessar|entrar|abre|ir para|tocar|play|iniciar)\b/;
-
   for (const chave in atalhos) {
     const chaveRegex = new RegExp(`\\b${chave}\\b`, 'i');
     if (intencaoRegex.test(texto) && chaveRegex.test(texto)) {
@@ -91,7 +86,6 @@ function respostasDinamicas(pergunta) {
       });
     }
   }
-
   return null;
 }
 
@@ -103,17 +97,15 @@ async function gerarRespostaSocket(pergunta, historico) {
   if (dinamica) return dinamica;
 
   for (const item of respostas) {
-    const todasPresentes = item.keywords.every((k) => texto.includes(k));
+    const todasPresentes = item.keywords.every(k => texto.includes(k));
     if (todasPresentes) return item.response;
   }
 
   const sistemaContent = `
-    ⚠️ A data e hora atual é: ${agora}
+    ⚠️ Data/hora: ${agora}
     Você é J.A.R.V.I.S., assistente pessoal com personalidade sarcástica (sem ser rude), educado e inteligente.
     Criador: senhor Maycon, fã do Homem de Ferro e da Marvel.
     Estilo: direto, prático e conciso; humor britânico sutil; linguagem natural em português do Brasil.
-    Não revele que é uma IA; responda elegantemente se não souber algo.
-    Evite desperdício de tokens: resuma, vá direto ao ponto.
   `;
 
   const mensagens = [
@@ -131,17 +123,16 @@ async function gerarRespostaSocket(pergunta, historico) {
 
     return response.data.choices[0].message.content;
   } catch (err) {
-    console.error('Erro ao chamar Groq (socket):', err.response?.data || err.message);
-    return "Tive um problema técnico ao acessar minha base de conhecimento, senhor Maycon.";
+    console.error('Erro ao chamar Groq:', err.response?.data || err.message);
+    return "Tive um problema técnico, senhor Maycon.";
   }
 }
 
 // --- Rotas ---
+// Chat
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
-  if (!message || typeof message !== 'string') {
-    return res.status(400).json({ reply: 'Por favor, envie uma mensagem válida, senhor Maycon.' });
-  }
+  if (!message || typeof message !== 'string') return res.status(400).json({ reply: 'Mensagem inválida.' });
 
   try {
     let reply = '';
@@ -153,7 +144,8 @@ app.post('/api/chat', async (req, res) => {
 
       const sess = sessionStore[sid];
       sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
-      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2) sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
+      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2)
+        sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
 
       reply = await gerarRespostaSocket(message, sess.messages);
       sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
@@ -162,40 +154,44 @@ app.post('/api/chat', async (req, res) => {
       reply = await gerarRespostaSocket(message, historicoConversa);
     }
 
-    return res.json({ reply, sessionId: sid });
+    res.json({ reply, sessionId: sid });
   } catch (err) {
-    console.error('Erro no /api/chat:', err);
-    return res.status(500).json({ reply: 'Ocorreu um erro de chat, senhor Maycon. Tente novamente mais tarde.' });
+    console.error('Erro /api/chat:', err);
+    res.status(500).json({ reply: 'Erro no chat, tente novamente mais tarde.' });
   }
 });
 
+// Resetar memória
 app.post('/api/resetar', async (req, res) => {
   historicoConversa = [];
   if (process.env.MONGO_URI) {
-    try { await Conversa.findOneAndDelete({ usuario: 'senhorMaycon' }); } 
-    catch (err) { console.warn('❌ Não foi possível limpar no MongoDB. Continuando mesmo assim...'); }
+    try { await Conversa.findOneAndDelete({ usuario: 'senhorMaycon' }); }
+    catch (err) { console.warn('Não foi possível limpar MongoDB.'); }
   }
-  res.json({ msg: 'Memória de curto prazo apagada com sucesso, senhor Maycon.' });
+  res.json({ msg: 'Memória de curto prazo apagada com sucesso.' });
 });
 
-// --- Rota STT (voz → texto) ---
-app.post('/api/stt', async (req, res) => {
+// STT
+app.post("/api/stt", async (req, res) => {
   try {
     if (!req.files || !req.files.audio) {
+      console.log("req.files:", req.files);
       return res.status(400).json({ error: "Áudio não enviado" });
     }
 
     const audioFile = req.files.audio;
+
     const FormData = require("form-data");
     const formData = new FormData();
     formData.append("file", audioFile.data, audioFile.name);
     formData.append("model", "whisper-1");
 
-    const response = await axios.post(
-      "https://api.openai.com/v1/audio/transcriptions",
-      formData,
-      { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...formData.getHeaders() } }
-    );
+    const response = await axios.post("https://api.openai.com/v1/audio/transcriptions", formData, {
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...formData.getHeaders()
+      }
+    });
 
     res.json({ text: response.data.text });
   } catch (err) {
@@ -204,9 +200,13 @@ app.post('/api/stt', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.send('🧠 API do J.A.R.V.I.S está online e funcionando perfeitamente, senhor Maycon.'));
+// Home
+app.get("/", (req, res) => res.send("🧠 J.A.R.V.I.S API Online"));
 
-// --- WebSocket ---
+// WebSocket
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
+
 io.on('connection', (socket) => {
   socketHistories[socket.id] = [];
 
@@ -220,11 +220,11 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => delete socketHistories[socket.id]);
 });
 
-// --- Iniciar servidor ---
+// Iniciar servidor
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT} com WebSocket ativo`));
+server.listen(PORT, () => console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT}`));
 
-// --- Limpeza de sessões antigas ---
+// Limpeza de sessões antigas
 setInterval(() => {
   const now = Date.now();
   for (const sid of Object.keys(sessionStore)) {
