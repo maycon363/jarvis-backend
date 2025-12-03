@@ -24,7 +24,7 @@ app.use(fileUpload());
 
 // --- Configurações ---
 const MAX_MESSAGES_PER_SESSION = 40;
-const SESSION_TTL_MS = 1000 * 60 * 30; // 30 minutos
+const SESSION_TTL_MS = 1000 * 60 * 30;
 const sessionStore = {};
 const socketHistories = {};
 
@@ -33,145 +33,129 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB conectado'))
   .catch(err => console.error('Erro ao conectar MongoDB:', err));
 
-// --- Respostas fixas ---
+// --- Respostas automáticas ---
 let respostas = JSON.parse(fs.readFileSync('respostas.json', 'utf-8'));
 let historicoConversa = [];
 
 async function carregarHistorico() {
   try {
-    if (process.env.MONGO_URI) {
-      const conversa = await Conversa.findOne({ usuario: 'senhorMaycon' });
-      if (conversa) {
-        historicoConversa = conversa.mensagens.map(({ role, content }) => ({ role, content }));
-        console.log('📁 Histórico carregado do MongoDB:', historicoConversa.length, 'mensagens');
-      }
+    const c = await Conversa.findOne({ usuario: 'senhorMaycon' });
+    if (c) {
+      historicoConversa = c.mensagens.map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+      console.log("📁 Histórico carregado:", historicoConversa.length, "mensagens");
     }
   } catch (err) {
-    console.warn('🔌 MongoDB não disponível, rodando em modo anônimo.');
+    console.warn("MongoDB indisponível, seguindo sem histórico persistente.");
   }
 }
 
 carregarHistorico();
 
-// --- Funções auxiliares ---
-function respostasDinamicas(pergunta) {
-  const texto = pergunta.toLowerCase();
+// Função de atalhos
+function respostasDinamicas(texto) {
+  texto = texto.toLowerCase();
   const atalhos = {
     google: "https://www.google.com",
-    linkedin: "https://www.linkedin.com",
-    youtube: "vnd.youtube://",
-    github: "https://www.github.com",
-    calculadora: "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
-    whatsapp: "whatsapp://send?text=Olá",
-    instagram: "instagram://user?username=seu_usuario",
-    facebook: "fb://",
-    spotify: "spotify://",
-    netflix: "nflx://",
-    chatgpt: "https://chat.openai.com",
-    twitch: "twitch://",
-    notion: "notion://",
-    gmail: "mailto:seuemail@gmail.com",
-    figma: "figma://",
-    canva: "https://www.canva.com"
+    youtube: "https://youtube.com",
+    linkedin: "https://linkedin.com",
+    github: "https://github.com",
+    whatsapp: "whatsapp://send?text=Olá"
   };
 
-  const intencaoRegex = /\b(abrir|acessar|entrar|abre|ir para|tocar|play|iniciar)\b/;
+  const qualquer = /\b(abrir|acessar|entrar|abrir|vai para)\b/;
+
   for (const chave in atalhos) {
-    const chaveRegex = new RegExp(`\\b${chave}\\b`, 'i');
-    if (intencaoRegex.test(texto) && chaveRegex.test(texto)) {
+    if (texto.includes(chave) && qualquer.test(texto)) {
       return JSON.stringify({
         action: "openLink",
-        app: chave,
         url: atalhos[chave]
       });
     }
   }
+
   return null;
 }
 
+// Geração de resposta
 async function gerarRespostaSocket(pergunta, historico) {
-  const texto = pergunta.toLowerCase();
-  const dinamica = respostasDinamicas(texto);
-
-  const agora = new Date().toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "long", timeZone: "America/Sao_Paulo" });
+  const dinamica = respostasDinamicas(pergunta);
   if (dinamica) return dinamica;
-
-  for (const item of respostas) {
-    const todasPresentes = item.keywords.every(k => texto.includes(k));
-    if (todasPresentes) return item.response;
-  }
-
-  const sistemaContent = `
-    ⚠️ Data/hora: ${agora}
-    Você é J.A.R.V.I.S., assistente pessoal com personalidade sarcástica (sem ser rude), educado e inteligente.
-    Criador: senhor Maycon, fã do Homem de Ferro e da Marvel.
-    Estilo: direto, prático e conciso; humor britânico sutil; linguagem natural em português do Brasil.
-  `;
-
-  const mensagens = [
-    { role: 'system', content: sistemaContent },
-    ...historico.map(({ role, content }) => ({ role, content })),
-    { role: 'user', content: pergunta }
-  ];
 
   try {
     const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      { model: 'llama-3.3-70b-versatile', messages: mensagens, temperature: 0.9, max_tokens: 600 },
-      { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` } }
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "system",
+            content: "Você é JARVIS, direto, inteligente e com leve sarcasmo."
+          },
+          ...historico,
+          { role: "user", content: pergunta }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
     );
 
     return response.data.choices[0].message.content;
   } catch (err) {
-    console.error('Erro ao chamar Groq:', err.response?.data || err.message);
-    return "Tive um problema técnico, senhor Maycon.";
+    console.error("Erro Groq:", err.response?.data || err.message);
+    return "Erro ao pensar, senhor Maycon.";
   }
 }
 
 // --- Rotas ---
-// Chat
+// CHAT
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
-  if (!message || typeof message !== 'string') return res.status(400).json({ reply: 'Mensagem inválida.' });
+  if (!message) return res.status(400).json({ reply: 'Mensagem inválida.' });
 
   try {
-    let reply = '';
     let sid = sessionId;
+    let reply = "";
 
     if (PUBLIC_MODE) {
-      sid = sessionId || `anon_${req.ip}_${Date.now()}`;
+      sid = sessionId || `anon_${Date.now()}`;
       if (!sessionStore[sid]) sessionStore[sid] = { messages: [], lastSeen: Date.now() };
 
       const sess = sessionStore[sid];
-      sess.messages.push({ role: 'user', content: message, timestamp: new Date() });
-      if (sess.messages.length > MAX_MESSAGES_PER_SESSION * 2)
-        sess.messages = sess.messages.slice(-MAX_MESSAGES_PER_SESSION * 2);
+      sess.messages.push({ role: 'user', content: message });
 
       reply = await gerarRespostaSocket(message, sess.messages);
-      sess.messages.push({ role: 'assistant', content: reply, timestamp: new Date() });
+      sess.messages.push({ role: 'assistant', content: reply });
       sess.lastSeen = Date.now();
     } else {
+      historicoConversa.push({ role: "user", content: message });
       reply = await gerarRespostaSocket(message, historicoConversa);
+      historicoConversa.push({ role: "assistant", content: reply });
     }
 
     res.json({ reply, sessionId: sid });
+
   } catch (err) {
-    console.error('Erro /api/chat:', err);
-    res.status(500).json({ reply: 'Erro no chat, tente novamente mais tarde.' });
+    console.error("Erro no /api/chat:", err);
+    res.status(500).json({ reply: "Erro interno." });
   }
 });
 
-// Resetar memória
-app.post('/api/resetar', async (req, res) => {
+// RESET
+app.post("/api/resetar", async (req, res) => {
   historicoConversa = [];
-  if (process.env.MONGO_URI) {
-    try { await Conversa.findOneAndDelete({ usuario: 'senhorMaycon' }); }
-    catch (err) { console.warn('Não foi possível limpar MongoDB.'); }
-  }
-  res.json({ msg: 'Memória de curto prazo apagada com sucesso.' });
+  try { await Conversa.findOneAndDelete({ usuario: "senhorMaycon" }); }
+  catch {}
+  res.json({ msg: "Memória apagada." });
 });
 
-// STT
+// --- 🚀 STT CORRIGIDO (SEM FFMPEG) ---
 app.post("/api/stt", async (req, res) => {
   try {
     if (!req.files || !req.files.audio) {
@@ -182,49 +166,55 @@ app.post("/api/stt", async (req, res) => {
     const audioFile = req.files.audio;
 
     const FormData = require("form-data");
-    const formData = new FormData();
-    formData.append("file", audioFile.data, audioFile.name);
-    formData.append("model", "whisper-1");
+    const form = new FormData();
 
-    const response = await axios.post("https://api.openai.com/v1/audio/transcriptions", formData, {
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        ...formData.getHeaders()
+    form.append("file", audioFile.data, audioFile.name); // webm direto
+    form.append("model", "whisper-1");
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/audio/transcriptions",
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          ...form.getHeaders()
+        }
       }
-    });
+    );
 
-    res.json({ text: response.data.text });
+    return res.json({ text: response.data.text });
+
   } catch (err) {
     console.error("Erro STT:", err.response?.data || err.message);
-    res.status(500).json({ error: "Erro no reconhecimento de voz" });
+    return res.status(500).json({ error: "Erro no reconhecimento de voz" });
   }
 });
 
 // Home
-app.get("/", (req, res) => res.send("🧠 J.A.R.V.I.S API Online"));
+app.get("/", (_, res) => res.send("🧠 JARVIS API Online"));
 
-// WebSocket
+// SOCKET
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-io.on('connection', (socket) => {
+io.on("connection", (socket) => {
   socketHistories[socket.id] = [];
 
-  socket.on('mensagem', async (mensagem) => {
-    socketHistories[socket.id].push({ role: 'user', content: mensagem });
-    const resposta = await gerarRespostaSocket(mensagem, socketHistories[socket.id]);
-    socketHistories[socket.id].push({ role: 'assistant', content: resposta });
-    socket.emit('resposta', resposta);
+  socket.on("mensagem", async (msg) => {
+    socketHistories[socket.id].push({ role: "user", content: msg });
+    const resposta = await gerarRespostaSocket(msg, socketHistories[socket.id]);
+    socketHistories[socket.id].push({ role: "assistant", content: resposta });
+    socket.emit("resposta", resposta);
   });
 
-  socket.on('disconnect', () => delete socketHistories[socket.id]);
+  socket.on("disconnect", () => delete socketHistories[socket.id]);
 });
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => console.log(`🧠 J.A.R.V.I.S rodando na porta ${PORT}`));
+server.listen(PORT, () => console.log("🧠 JARVIS rodando na porta " + PORT));
 
-// Limpeza de sessões antigas
+// Limpeza
 setInterval(() => {
   const now = Date.now();
   for (const sid of Object.keys(sessionStore)) {

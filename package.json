@@ -13,6 +13,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "@google-cloud/text-to-speech": "^6.4.0",
     "axios": "^1.12.2",
     "cors": "^2.8.5",
