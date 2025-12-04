@@ -164,46 +164,46 @@ app.post("/api/stt", async (req, res) => {
 
     const audioFile = req.files.audio;
     
-    // Importante: form-data deve ser importado aqui ou no topo
+    // Importante: certifique-se de ter 'npm install form-data'
     const FormData = require("form-data"); 
     const form = new FormData();
 
-    // 1. Anexar o Buffer do arquivo
-    // O 3º parâmetro { filename: ... } é OBRIGATÓRIO para a OpenAI aceitar Buffer
+    // 1. Anexar o arquivo (A Groq é chata com o nome do arquivo, mantenha 'audio.webm')
     form.append("file", audioFile.data, {
       filename: "audio.webm", 
       contentType: audioFile.mimetype || "audio/webm",
     });
 
-    // 2. Definir o modelo
-    form.append("model", "whisper-1");
-    // Opcional: language ajuda na precisão (pt para português)
-    form.append("language", "pt"); 
+    // 2. Modelo da Groq (Whisper V3)
+    form.append("model", "whisper-large-v3"); 
+    // Dica: 'distil-whisper-large-v3-en' é mais rápido, mas só inglês.
+    // Para português, use 'whisper-large-v3'.
+    
+    form.append("response_format", "json");
+    form.append("language", "pt"); // Força português para evitar confusão
 
-    console.log("📤 Enviando áudio para OpenAI Whisper...");
+    console.log("📤 Enviando áudio para Groq Whisper...");
 
     const response = await axios.post(
-      "https://api.openai.com/v1/audio/transcriptions",
+      "https://api.groq.com/openai/v1/audio/transcriptions", // <--- URL DA GROQ
       form,
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          ...form.getHeaders(), // CRUCIAL: Adiciona o Content-Type multipart correto
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`, // <--- USA SUA CHAVE GROQ
+          ...form.getHeaders(),
         },
-        maxBodyLength: Infinity, // Previne erro com arquivos grandes
+        maxBodyLength: Infinity,
         maxContentLength: Infinity,
       }
     );
 
-    console.log("✅ Transcrição concluída:", response.data.text);
+    console.log("✅ Transcrição Groq:", response.data.text);
     return res.json({ text: response.data.text });
 
   } catch (err) {
-    // Log detalhado do erro da OpenAI para facilitar debug
-    console.error("❌ Erro OpenAI STT:", err.response ? err.response.data : err.message);
-    
+    console.error("❌ Erro Groq STT:", err.response ? err.response.data : err.message);
     return res.status(500).json({ 
-      error: "Erro ao processar áudio no servidor.",
+      error: "Erro no reconhecimento de voz (Groq)",
       details: err.response?.data || err.message 
     });
   }
