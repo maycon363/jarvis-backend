@@ -159,17 +159,28 @@ app.post("/api/resetar", async (req, res) => {
 app.post("/api/stt", async (req, res) => {
   try {
     if (!req.files || !req.files.audio) {
-      console.log("req.files:", req.files);
-      return res.status(400).json({ error: "Áudio não enviado" });
+      return res.status(400).json({ error: "Nenhum arquivo de áudio recebido." });
     }
 
     const audioFile = req.files.audio;
-
-    const FormData = require("form-data");
+    
+    // Importante: form-data deve ser importado aqui ou no topo
+    const FormData = require("form-data"); 
     const form = new FormData();
 
-    form.append("file", audioFile.data, audioFile.name); // webm direto
+    // 1. Anexar o Buffer do arquivo
+    // O 3º parâmetro { filename: ... } é OBRIGATÓRIO para a OpenAI aceitar Buffer
+    form.append("file", audioFile.data, {
+      filename: "audio.webm", 
+      contentType: audioFile.mimetype || "audio/webm",
+    });
+
+    // 2. Definir o modelo
     form.append("model", "whisper-1");
+    // Opcional: language ajuda na precisão (pt para português)
+    form.append("language", "pt"); 
+
+    console.log("📤 Enviando áudio para OpenAI Whisper...");
 
     const response = await axios.post(
       "https://api.openai.com/v1/audio/transcriptions",
@@ -177,16 +188,24 @@ app.post("/api/stt", async (req, res) => {
       {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          ...form.getHeaders()
-        }
+          ...form.getHeaders(), // CRUCIAL: Adiciona o Content-Type multipart correto
+        },
+        maxBodyLength: Infinity, // Previne erro com arquivos grandes
+        maxContentLength: Infinity,
       }
     );
 
+    console.log("✅ Transcrição concluída:", response.data.text);
     return res.json({ text: response.data.text });
 
   } catch (err) {
-    console.error("Erro STT:", err.response?.data || err.message);
-    return res.status(500).json({ error: "Erro no reconhecimento de voz" });
+    // Log detalhado do erro da OpenAI para facilitar debug
+    console.error("❌ Erro OpenAI STT:", err.response ? err.response.data : err.message);
+    
+    return res.status(500).json({ 
+      error: "Erro ao processar áudio no servidor.",
+      details: err.response?.data || err.message 
+    });
   }
 });
 
