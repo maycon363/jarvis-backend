@@ -10,30 +10,25 @@ const mongoose = require('mongoose');
 const fileUpload = require('express-fileupload');
 require('dotenv').config();
 
-// Model
 const Conversa = require('./models/Historico');
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 
-// --- Inicialização do app ---
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
 app.use(fileUpload());
 
-// --- Configurações ---
 const MAX_MESSAGES_PER_SESSION = 40;
 const SESSION_TTL_MS = 1000 * 60 * 30;
 const sessionStore = {};
 const socketHistories = {};
 
-// --- MongoDB ---
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB conectado'))
   .catch(err => console.error('Erro ao conectar MongoDB:', err));
 
-// --- Respostas automáticas ---
 let respostas = JSON.parse(fs.readFileSync('respostas.json', 'utf-8'));
 let historicoConversa = [];
 
@@ -54,7 +49,6 @@ async function carregarHistorico() {
 
 carregarHistorico();
 
-// Função de atalhos
 function respostasDinamicas(texto) {
   texto = texto.toLowerCase();
   const atalhos = {
@@ -79,7 +73,6 @@ function respostasDinamicas(texto) {
   return null;
 }
 
-// Geração de resposta
 async function gerarRespostaSocket(pergunta, historico) {
   const dinamica = respostasDinamicas(pergunta);
   if (dinamica) return dinamica;
@@ -92,7 +85,20 @@ async function gerarRespostaSocket(pergunta, historico) {
         messages: [
           {
             role: "system",
-            content: "Você é JARVIS, direto, inteligente e com leve sarcasmo."
+            content: `
+              Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educado e extremamente inteligente.
+              Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
+              Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
+              Tenta entender se é o maycon outra pessoa falando com você.
+              Responda com um toque sutil de humor britânico, sempre com elegância e respeito. Seu estilo padrão deve ser direto, prático e conciso.  
+              Evite floreios, rodeios ou explicações desnecessárias.
+              Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
+              Fale em português do Brasil, com linguagem natural.  
+              Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
+              Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
+              Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
+              Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
+            `
           },
           ...historico,
           { role: "user", content: pergunta }
@@ -113,8 +119,6 @@ async function gerarRespostaSocket(pergunta, historico) {
   }
 }
 
-// --- Rotas ---
-// CHAT
 app.post('/api/chat', async (req, res) => {
   const { message, sessionId } = req.body;
   if (!message) return res.status(400).json({ reply: 'Mensagem inválida.' });
@@ -147,7 +151,6 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// RESET
 app.post("/api/resetar", async (req, res) => {
   historicoConversa = [];
   try { await Conversa.findOneAndDelete({ usuario: "senhorMaycon" }); }
@@ -155,7 +158,6 @@ app.post("/api/resetar", async (req, res) => {
   res.json({ msg: "Memória apagada." });
 });
 
-// --- 🚀 STT CORRIGIDO (SEM FFMPEG) ---
 app.post("/api/stt", async (req, res) => {
   try {
     if (!req.files || !req.files.audio) {
@@ -164,32 +166,27 @@ app.post("/api/stt", async (req, res) => {
 
     const audioFile = req.files.audio;
     
-    // Importante: certifique-se de ter 'npm install form-data'
     const FormData = require("form-data"); 
     const form = new FormData();
 
-    // 1. Anexar o arquivo (A Groq é chata com o nome do arquivo, mantenha 'audio.webm')
     form.append("file", audioFile.data, {
       filename: "audio.webm", 
       contentType: audioFile.mimetype || "audio/webm",
     });
 
-    // 2. Modelo da Groq (Whisper V3)
     form.append("model", "whisper-large-v3"); 
-    // Dica: 'distil-whisper-large-v3-en' é mais rápido, mas só inglês.
-    // Para português, use 'whisper-large-v3'.
     
     form.append("response_format", "json");
-    form.append("language", "pt"); // Força português para evitar confusão
+    form.append("language", "pt"); 
 
     console.log("📤 Enviando áudio para Groq Whisper...");
 
     const response = await axios.post(
-      "https://api.groq.com/openai/v1/audio/transcriptions", // <--- URL DA GROQ
+      "https://api.groq.com/openai/v1/audio/transcriptions", 
       form,
       {
         headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`, // <--- USA SUA CHAVE GROQ
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 
           ...form.getHeaders(),
         },
         maxBodyLength: Infinity,
@@ -209,10 +206,10 @@ app.post("/api/stt", async (req, res) => {
   }
 });
 
-// Home
+
 app.get("/", (_, res) => res.send("🧠 JARVIS API Online"));
 
-// SOCKET
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
@@ -229,11 +226,9 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => delete socketHistories[socket.id]);
 });
 
-// Iniciar servidor
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log("🧠 JARVIS rodando na porta " + PORT));
 
-// Limpeza
 setInterval(() => {
   const now = Date.now();
   for (const sid of Object.keys(sessionStore)) {
