@@ -52,11 +52,22 @@ carregarHistorico();
 function respostasDinamicas(texto) {
   texto = texto.toLowerCase();
   const atalhos = {
-    google: "https://www.google.com",
-    youtube: "https://youtube.com",
-    linkedin: "https://linkedin.com",
-    github: "https://github.com",
-    whatsapp: "whatsapp://send?text=Olá"
+    "google": "https://www.google.com",
+    "linkedin": "https://www.linkedin.com",
+    "youtube": "vnd.youtube://",
+    "github": "https://www.github.com",
+    "calculadora": "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
+    "whatsapp": "whatsapp://send?text=Olá",
+    "instagram": "instagram://user?username=seu_usuario",
+    "facebook": "fb://",
+    "spotify": "spotify://",
+    "netflix": "nflx://",
+    "chatgpt": "https://chat.openai.com",
+    "twitch": "twitch://",
+    "notion": "notion://",
+    "gmail": "mailto:seuemail@gmail.com",
+    "figma": "figma://",
+    "canva": "https://www.canva.com"
   };
 
   const qualquer = /\b(abrir|acessar|entrar|abrir|vai para)\b/;
