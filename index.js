@@ -229,7 +229,66 @@ app.post("/api/stt", async (req, res) => {
 });
 
 
-app.get("/", (_, res) => res.send("🧠 JARVIS API Online"));
+app.post("/api/voice-auth", async (req, res) => {
+  try {
+    if (!req.files || !req.files.audio) {
+      return res.status(400).json({ error: "Nenhum arquivo de áudio recebido." });
+    }
+
+    const audioFile = req.files.audio;
+
+    const FormData = require("form-data");
+    const form = new FormData();
+    form.append("file", audioFile.data, "audio.wav");
+
+    const HF_KEY = process.env.HUGGINGFACE_API_KEY;
+
+    // 🔍 Chamada para gerar embedding de voz
+    const result = await axios.post(
+      "https://api-inference.huggingface.co/models/speechbrain/spkrec-ecapa-voxceleb",
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${HF_KEY}`,
+          ...form.getHeaders()
+        }
+      }
+    );
+
+    const embedding = result.data?.embedding;
+    if (!embedding) {
+      return res.status(500).json({ error: "Falha ao gerar embedding." });
+    }
+
+    // 🔐 Carrega embedding salvo do Maycon
+    const saved = JSON.parse(fs.readFileSync("voice.json", "utf-8"));
+    const mayconEmbedding = saved.maycon.embedding;
+
+    // Função para comparar similaridade
+    function cosineSimilarity(a, b) {
+      let sumAB = 0, sumA = 0, sumB = 0;
+      for (let i = 0; i < a.length; i++) {
+        sumAB += a[i] * b[i];
+        sumA += a[i] * a[i];
+        sumB += b[i] * b[i];
+      }
+      return sumAB / (Math.sqrt(sumA) * Math.sqrt(sumB));
+    }
+
+    const confidence = cosineSimilarity(embedding, mayconEmbedding);
+
+    const AUTH_THRESHOLD = 0.75;
+
+    return res.json({
+      authenticated: confidence >= AUTH_THRESHOLD,
+      confidence
+    });
+
+  } catch (err) {
+    console.error("Voice Auth Error:", err.response?.data || err.message);
+    return res.status(500).json({ error: "Erro ao processar áudio." });
+  }
+});
 
 
 const server = http.createServer(app);
