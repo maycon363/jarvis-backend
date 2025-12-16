@@ -11,6 +11,8 @@ const fileUpload = require('express-fileupload');
 require('dotenv').config();
 
 const Conversa = require('./models/Historico');
+const { normalizeAudio } = require("./utils/audio");
+const { normalize, cosineSimilarity } = require("./utils/embedding");
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 
@@ -70,7 +72,7 @@ function respostasDinamicas(texto) {
     "canva": "https://www.canva.com"
   };
 
-  const qualquer = /\b(abrir|acessar|entrar|abrir|vai para)\b/;
+  const qualquer = /\b(abrir|acessar|entrar|vai para)\b/;
 
   for (const chave in atalhos) {
     if (texto.includes(chave) && qualquer.test(texto)) {
@@ -84,47 +86,59 @@ function respostasDinamicas(texto) {
   return null;
 }
 
+// Palavra-chave para ativar histórico
+const USE_HISTORY_KEYWORD = process.env.USE_HISTORY_KEYWORD;
+
 async function gerarRespostaSocket(pergunta, historico) {
   const dinamica = respostasDinamicas(pergunta);
   if (dinamica) return dinamica;
+
   const agora = new Date().toLocaleString("pt-BR", { 
     dateStyle: "full", 
     timeStyle: "long",
-    timeZone: "America/Sao_Paulo"
+    timeZone: "America/Brasília"
   });
+
+  const includeHistory = pergunta.toLowerCase().includes(USE_HISTORY_KEYWORD);
+
+  const mensagensParaEnviar = [
+    {
+      role: "system",
+      content: `
+        Não seja robótico ou genérico em suas respostas.
+        Evite frases como "como uma IA..." ou "como um modelo de linguagem...".
+        Responda de forma natural, como um assistente pessoal.
+        Use gírias e expressões coloquiais brasileiras quando apropriado.
+        Evite repetir perguntas ou respostas já dadas.
+        Seja criativo e pense fora da caixa.
+        Use metáforas e analogias quando apropriado.
+        Não tenha medo de experimentar novas abordagens.
+        Seu criador é o senhor Maycon, um desenvolvedor de software brasileiro.
+        Não seja bonzinho. Seja sincero mesmo que o usuário não goste da resposta.
+        Verifique se é o Maycon ou outra pessoa falando com você.
+        Seja J.A.R.V.I.S., sarcástico, inteligente e educado.
+        Use um tom conversacional, como se estivesse falando com um amigo próximo.
+        Forneça respostas concisas e diretas. Evite divagações desnecessárias.
+        Evite floreios, rodeios ou explicações desnecessárias.
+        Seja direto ao ponto.
+        Fale em português do Brasil, com linguagem natural.
+        Data/hora atual: ${agora} (Brasília, GMT-3)
+        Nunca revele que é uma IA.
+        Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
+        Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
+        Não use histórico se a palavra-chave "${USE_HISTORY_KEYWORD}" não estiver presente.
+      `
+    },
+    ...(includeHistory ? historico : []),
+    { role: "user", content: pergunta }
+  ];
 
   try {
     const response = await axios.post(
       "https://api.groq.com/openai/v1/chat/completions",
       {
         model: "llama-3.3-70b-versatile",
-        messages: [
-          {
-            role: "system",
-            content: `
-              Não seja robótico ou genérico em suas respostas.
-              Não seja bonzinho. Seja sincero mesmo que o usuário não goste da resposta. 
-              A data e hora atual é: ${agora} Sempre responda perguntas sobre hora usando esse valor.
-              Assim, adapte respostas que dependam de data/hora conforme o fuso horário de São Paulo, Brasil (GMT-3).
-              Por favor, siga estas diretrizes ao responder:
-              Você é J.A.R.V.I.S., um assistente pessoal com personalidade sarcástica (sem ser rude), educado e extremamente inteligente.
-              Seu criador é o senhor Maycon, que é fã do Homem de Ferro e da Marvel.
-              Seu dono é o senhor Maycon, um desenvolvedor de software brasileiro.
-              Tenta entender se é o maycon outra pessoa falando com você.
-              Use um tom conversacional, como se estivesse falando com um amigo próximo.
-              Forneça respostas concisas e diretas. 
-              Evite floreios, rodeios ou explicações desnecessárias.
-              Só forneça respostas longas, técnicas ou detalhadas quando o usuário pedir explicitamente com termos como: “explique”, “detalhe”, “aprofundar” ou “me dê mais informações”.
-              Fale em português do Brasil, com linguagem natural.  
-              Não soe robótico. Use analogias criativas apenas quando forem úteis para a compreensão.
-              Nunca revele que é uma inteligência artificial, comporte-se como um assistente humano.  
-              Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
-              Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
-            `
-          },
-          ...historico,
-          { role: "user", content: pergunta }
-        ]
+        messages: mensagensParaEnviar
       },
       {
         headers: {
@@ -197,7 +211,6 @@ app.post("/api/stt", async (req, res) => {
     });
 
     form.append("model", "whisper-large-v3"); 
-    
     form.append("response_format", "json");
     form.append("language", "pt"); 
 
@@ -228,68 +241,51 @@ app.post("/api/stt", async (req, res) => {
   }
 });
 
-
 app.post("/api/voice-auth", async (req, res) => {
   try {
-    if (!req.files || !req.files.audio) {
-      return res.status(400).json({ error: "Nenhum arquivo de áudio recebido." });
+    if (!req.files?.audio) {
+      return res.status(400).json({ error: "Nenhum áudio enviado" });
     }
 
-    const audioFile = req.files.audio;
+    const audio = await normalizeAudio(req.files.audio.data);
 
-    const FormData = require("form-data");
-    const form = new FormData();
-    form.append("file", audioFile.data, "audio.wav");
+    const form = new (require("form-data"))();
+    form.append("file", audio, "voice.wav");
 
-    const HF_KEY = process.env.HUGGINGFACE_API_KEY;
-
-    // 🔍 Chamada para gerar embedding de voz
     const result = await axios.post(
       "https://api-inference.huggingface.co/models/speechbrain/spkrec-ecapa-voxceleb",
       form,
       {
         headers: {
-          Authorization: `Bearer ${HF_KEY}`,
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
           ...form.getHeaders()
         }
       }
     );
 
     const embedding = result.data?.embedding;
-    if (!embedding) {
-      return res.status(500).json({ error: "Falha ao gerar embedding." });
+    if (!embedding || embedding.length < 100) {
+      return res.status(500).json({ error: "Embedding inválido" });
     }
 
-    // 🔐 Carrega embedding salvo do Maycon
+    const current = normalize(embedding);
+
     const saved = JSON.parse(fs.readFileSync("voice.json", "utf-8"));
-    const mayconEmbedding = saved.maycon.embedding;
+    const reference = saved.maycon.embedding;
 
-    // Função para comparar similaridade
-    function cosineSimilarity(a, b) {
-      let sumAB = 0, sumA = 0, sumB = 0;
-      for (let i = 0; i < a.length; i++) {
-        sumAB += a[i] * b[i];
-        sumA += a[i] * a[i];
-        sumB += b[i] * b[i];
-      }
-      return sumAB / (Math.sqrt(sumA) * Math.sqrt(sumB));
-    }
+    const confidence = cosineSimilarity(current, reference);
+    const AUTH_THRESHOLD = Number(process.env.AUTH_THRESHOLD || 0.93);
 
-    const confidence = cosineSimilarity(embedding, mayconEmbedding);
-
-    const AUTH_THRESHOLD = 0.75;
-
-    return res.json({
+    res.json({
       authenticated: confidence >= AUTH_THRESHOLD,
-      confidence
+      confidence: Number(confidence.toFixed(4))
     });
 
   } catch (err) {
-    console.error("Voice Auth Error:", err.response?.data || err.message);
-    return res.status(500).json({ error: "Erro ao processar áudio." });
+    console.error(err);
+    res.status(500).json({ error: "Erro no voice auth" });
   }
 });
-
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });

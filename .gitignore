@@ -1,5 +1,7 @@
 # Ignorar arquivo de variáveis de ambiente
 .env
+voice.json
+respostas.json
 
 # Dependências node_modules
 node_modules/
