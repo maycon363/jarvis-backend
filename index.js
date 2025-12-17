@@ -11,8 +11,6 @@ const fileUpload = require('express-fileupload');
 require('dotenv').config();
 
 const Conversa = require('./models/Historico');
-const { normalizeAudio } = require("./utils/audio");
-const { normalize, cosineSimilarity } = require("./utils/embedding");
 
 const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
 
@@ -99,7 +97,7 @@ async function gerarRespostaSocket(pergunta, historico) {
     timeZone: "America/Brasília"
   });
 
-  const includeHistory = pergunta.toLowerCase().includes(USE_HISTORY_KEYWORD);
+  const includeHistory = USE_HISTORY_KEYWORD && pergunta.toLowerCase().includes(USE_HISTORY_KEYWORD.toLowerCase());
 
   const mensagensParaEnviar = [
     {
@@ -241,51 +239,6 @@ app.post("/api/stt", async (req, res) => {
   }
 });
 
-app.post("/api/voice-auth", async (req, res) => {
-  try {
-    if (!req.files?.audio) {
-      return res.status(400).json({ error: "Nenhum áudio enviado" });
-    }
-
-    const audio = await normalizeAudio(req.files.audio.data);
-
-    const form = new (require("form-data"))();
-    form.append("file", audio, "voice.wav");
-
-    const result = await axios.post(
-      "https://api-inference.huggingface.co/models/speechbrain/spkrec-ecapa-voxceleb",
-      form,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          ...form.getHeaders()
-        }
-      }
-    );
-
-    const embedding = result.data?.embedding;
-    if (!embedding || embedding.length < 100) {
-      return res.status(500).json({ error: "Embedding inválido" });
-    }
-
-    const current = normalize(embedding);
-
-    const saved = JSON.parse(fs.readFileSync("voice.json", "utf-8"));
-    const reference = saved.maycon.embedding;
-
-    const confidence = cosineSimilarity(current, reference);
-    const AUTH_THRESHOLD = Number(process.env.AUTH_THRESHOLD || 0.93);
-
-    res.json({
-      authenticated: confidence >= AUTH_THRESHOLD,
-      confidence: Number(confidence.toFixed(4))
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro no voice auth" });
-  }
-});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
