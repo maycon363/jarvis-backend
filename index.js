@@ -94,8 +94,10 @@ async function gerarRespostaSocket(pergunta, historico) {
   const agora = new Date().toLocaleString("pt-BR", { 
     dateStyle: "full", 
     timeStyle: "long",
-    timeZone: "America/Brasília"
+    timeZone: "America/Sao_Paulo"
   });
+
+  const agoraComBrasilia = agora.replace("GMT-3", "Brasília, GMT-3");
 
   const includeHistory = USE_HISTORY_KEYWORD && pergunta.toLowerCase().includes(USE_HISTORY_KEYWORD.toLowerCase());
 
