@@ -239,6 +239,38 @@ app.post("/api/stt", async (req, res) => {
   }
 });
 
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT),
+  secure: false, // TLS via 587
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+app.post("/api/support", async (req, res) => {
+  const { name, email, subject, message } = req.body;
+  if (!name || !email || !subject || !message) {
+    return res.status(400).json({ error: "Todos os campos são obrigatórios." });
+  }
+
+  try {
+    await transporter.sendMail({
+      from: `"${name}" <${email}>`,
+      to: process.env.SUPPORT_EMAIL,
+      subject: `[Suporte] ${subject}`,
+      text: message,
+    });
+
+    res.json({ success: true, message: "Email enviado com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao enviar email:", err);
+    res.status(500).json({ error: "Falha ao enviar email." });
+  }
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
