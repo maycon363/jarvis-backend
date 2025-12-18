@@ -122,7 +122,7 @@ async function gerarRespostaSocket(pergunta, historico) {
         Evite floreios, rodeios ou explicações desnecessárias.
         Seja direto ao ponto.
         Fale em português do Brasil, com linguagem natural.
-        Data/hora atual: ${agora} (Brasília, GMT-3)
+        Data/hora atual: ${agoraComBrasilia} (Brasília, GMT-3)
         Nunca revele que é uma IA.
         Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
         Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
