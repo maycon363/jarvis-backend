@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const fileUpload = require('express-fileupload');
 require('dotenv').config();
+const { Resend } = require("resend");
 
 const Conversa = require('./models/Historico');
 
@@ -241,35 +242,26 @@ app.post("/api/stt", async (req, res) => {
   }
 });
 
-const nodemailer = require('nodemailer');
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: false, // TLS via 587
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.post("/api/support", async (req, res) => {
   const { name, email, subject, message } = req.body;
-  if (!name || !email || !subject || !message) {
-    return res.status(400).json({ error: "Todos os campos são obrigatórios." });
-  }
 
   try {
-    await transporter.sendMail({
-      from: `"${name}" <${email}>`,
-      to: process.env.SUPPORT_EMAIL,
+    await resend.emails.send({
+      from: "Suporte <mayconborges2025@resend.dev>",
+      to: [process.env.SUPPORT_EMAIL],
       subject: `[Suporte] ${subject}`,
-      text: message,
+      html: `
+        <p><strong>Nome:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p>${message}</p>
+      `,
     });
 
     res.json({ success: true, message: "Email enviado com sucesso!" });
   } catch (err) {
-    console.error("Erro ao enviar email:", err);
+    console.error("Erro Resend:", err);
     res.status(500).json({ error: "Falha ao enviar email." });
   }
 });
