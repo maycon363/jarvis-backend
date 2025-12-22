@@ -94,16 +94,31 @@ async function gerarRespostaSocket(pergunta, historico) {
     const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
 
     try {
-      const climaRes = await axios.get(
-        `${process.env.BASE_URL || "http://localhost:3001"}/api/weather`,
-        { params: { city: cidade } }
-      );
+      const response = await axios.get(
+      "https://api.openweathermap.org/data/2.5/weather",
+      {
+        params: {
+          q: cidade,
+          appid: process.env.OPENWEATHER_API_KEY,
+          units: "metric",
+          lang: "pt_br"
+        }
+      }
+    );
 
-      const c = climaRes.data;
+    const data = response.data;
+
+    const c = {
+      cidade: data.name,
+      temperatura: Math.round(data.main.temp),
+      sensacao: Math.round(data.main.feels_like),
+      clima: data.weather[0].description,
+      umidade: data.main.humidity
+    };
 
       return `Agora em ${c.cidade}: ${c.clima}, ${c.temperatura}°C (sensação ${c.sensacao}°C), umidade ${c.umidade}%.`;
     } catch {
-      return "Tentei ver o clima, mas os satélites resolveram me ignorar 😒";
+      return "Tentei ver o clima, mas os satélites resolveram me ignorar";
     }
   }
   if (dinamica) return dinamica;
