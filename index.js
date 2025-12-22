@@ -85,11 +85,27 @@ function respostasDinamicas(texto) {
   return null;
 }
 
-// Palavra-chave para ativar histórico
 const USE_HISTORY_KEYWORD = process.env.USE_HISTORY_KEYWORD;
 
 async function gerarRespostaSocket(pergunta, historico) {
   const dinamica = respostasDinamicas(pergunta);
+    if (/clima|tempo|temperatura/.test(pergunta.toLowerCase())) {
+    const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
+    const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
+
+    try {
+      const climaRes = await axios.get(
+        `${process.env.BASE_URL || "http://localhost:3001"}/api/weather`,
+        { params: { city: cidade } }
+      );
+
+      const c = climaRes.data;
+
+      return `Agora em ${c.cidade}: ${c.clima}, ${c.temperatura}°C (sensação ${c.sensacao}°C), umidade ${c.umidade}%.`;
+    } catch {
+      return "Tentei ver o clima, mas os satélites resolveram me ignorar 😒";
+    }
+  }
   if (dinamica) return dinamica;
 
   const agora = new Date().toLocaleString("pt-BR", { 
@@ -280,6 +296,38 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => delete socketHistories[socket.id]);
+});
+
+app.get("/api/weather", async (req, res) => {
+  const { city } = req.query;
+  if (!city) return res.status(400).json({ error: "Cidade não informada." });
+
+  try {
+    const response = await axios.get(
+      "https://api.openweathermap.org/data/2.5/weather",
+      {
+        params: {
+          q: city,
+          appid: process.env.OPENWEATHER_API_KEY,
+          units: "metric",
+          lang: "pt_br"
+        }
+      }
+    );
+
+    const data = response.data;
+
+    res.json({
+      cidade: data.name,
+      temperatura: Math.round(data.main.temp),
+      sensacao: Math.round(data.main.feels_like),
+      clima: data.weather[0].description,
+      umidade: data.main.humidity
+    });
+  } catch (err) {
+    console.error("Erro clima:", err.response?.data || err.message);
+    res.status(500).json({ error: "Não consegui obter o clima." });
+  }
 });
 
 const PORT = process.env.PORT || 3001;
