@@ -121,7 +121,12 @@ async function gerarRespostaSocket(pergunta, historico) {
       return "Tentei ver o clima, mas os satélites resolveram me ignorar";
     }
   }
-  if (dinamica) return dinamica;
+  if (dinamica) {
+    return {
+      type: "action",
+      payload: JSON.parse(dinamica)
+    };
+  }
 
   const agora = new Date().toLocaleString("pt-BR", { 
     dateStyle: "full", 
@@ -181,10 +186,16 @@ async function gerarRespostaSocket(pergunta, historico) {
       }
     );
 
-    return response.data.choices[0].message.content;
+    return {
+      type: "message",
+      payload: response.data.choices[0].message.content
+    };
   } catch (err) {
     console.error("Erro Groq:", err.response?.data || err.message);
-    return "Erro ao pensar, senhor Maycon.";
+    return {
+      type: "message",
+      payload: "Erro ao pensar, senhor Maycon."
+    };
   }
 }
 
@@ -212,7 +223,10 @@ app.post('/api/chat', async (req, res) => {
       historicoConversa.push({ role: "assistant", content: reply });
     }
 
-    res.json({ reply, sessionId: sid });
+    res.json({
+      ...reply,
+      sessionId: sid
+    });
 
   } catch (err) {
     console.error("Erro no /api/chat:", err);
