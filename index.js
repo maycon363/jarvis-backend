@@ -88,13 +88,14 @@ function respostasDinamicas(texto) {
 const USE_HISTORY_KEYWORD = process.env.USE_HISTORY_KEYWORD;
 
 async function gerarRespostaSocket(pergunta, historico) {
+  let climaContexto = null;
   const dinamica = respostasDinamicas(pergunta);
     if (/clima|tempo|temperatura/.test(pergunta.toLowerCase())) {
-    const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
-    const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
+  const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
+  const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
 
-    try {
-      const response = await axios.get(
+  try {
+    const response = await axios.get(
       "https://api.openweathermap.org/data/2.5/weather",
       {
         params: {
@@ -108,15 +109,14 @@ async function gerarRespostaSocket(pergunta, historico) {
 
     const data = response.data;
 
-    const c = {
-      cidade: data.name,
-      temperatura: Math.round(data.main.temp),
-      sensacao: Math.round(data.main.feels_like),
-      clima: data.weather[0].description,
-      umidade: data.main.humidity
-    };
-
-      return `Agora em ${c.cidade}: ${c.clima}, ${c.temperatura}°C (sensação ${c.sensacao}°C), umidade ${c.umidade}%.`;
+    climaContexto = `
+      CLIMA CONSULTADO (OpenWeather):
+      Cidade: ${data.name}
+      Temperatura atual: ${Math.round(data.main.temp)}°C
+      Sensação térmica: ${Math.round(data.main.feels_like)}°C
+      Umidade: ${data.main.humidity}%
+      Condição: ${data.weather[0].description}
+      `;
     } catch {
       return "Tentei ver o clima, mas os satélites resolveram me ignorar";
     }
@@ -155,6 +155,7 @@ async function gerarRespostaSocket(pergunta, historico) {
         Seja direto ao ponto.
         Fale em português do Brasil, com linguagem natural.
         Data/hora atual: ${agoraComBrasilia} (Brasília, GMT-3)
+        ${climaContexto ? `CONTEXTO ADICIONAL:\n${climaContexto}` : ""}
         Nunca revele que é uma IA.
         Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
         Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
