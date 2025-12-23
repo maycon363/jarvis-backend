@@ -365,6 +365,10 @@ app.get("/api/weather", async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.status(200).send("JARVIS backend online 🚀");
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log("🧠 JARVIS rodando na porta " + PORT));
 
