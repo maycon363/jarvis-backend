@@ -52,23 +52,28 @@ carregarHistorico();
 
 function respostasDinamicas(texto) {
   texto = texto.toLowerCase();
+
   const atalhos = {
-    "google": "https://www.google.com",
-    "linkedin": "https://www.linkedin.com",
-    "youtube": "vnd.youtube://",
-    "github": "https://www.github.com",
-    "calculadora": "intent://calculator#Intent;scheme=android-app;package=com.android.calculator2;end",
-    "whatsapp": "whatsapp://send?text=Olá",
-    "instagram": "instagram://user?username=seu_usuario",
-    "facebook": "fb://",
-    "spotify": "spotify://",
-    "netflix": "nflx://",
-    "chatgpt": "https://chat.openai.com",
-    "twitch": "twitch://",
-    "notion": "notion://",
-    "gmail": "mailto:seuemail@gmail.com",
-    "figma": "figma://",
-    "canva": "https://www.canva.com"
+    instagram: {
+      mobile: "instagram://user?username=seu_usuario",
+      desktop: "https://www.instagram.com/seu_usuario/"
+    },
+    whatsapp: {
+      mobile: "whatsapp://send?text=Olá",
+      desktop: "https://web.whatsapp.com/"
+    },
+    youtube: {
+      mobile: "vnd.youtube://",
+      desktop: "https://www.youtube.com"
+    },
+    spotify: {
+      mobile: "spotify://",
+      desktop: "https://open.spotify.com"
+    },
+    linkedin: {
+      mobile: "linkedin://",
+      desktop: "https://www.linkedin.com"
+    }
   };
 
   const qualquer = /\b(abrir|acessar|entrar|vai para)\b/;
@@ -77,7 +82,7 @@ function respostasDinamicas(texto) {
     if (texto.includes(chave) && qualquer.test(texto)) {
       return JSON.stringify({
         action: "openLink",
-        url: atalhos[chave]
+        urls: atalhos[chave]
       });
     }
   }
