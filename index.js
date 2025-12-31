@@ -1,5 +1,4 @@
 // backend/index.js
-const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -13,16 +12,12 @@ const { Resend } = require("resend");
 
 const Conversa = require('./models/Historico');
 
-const PUBLIC_MODE = process.env.PUBLIC_MODE === 'true';
-
 const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
 app.use(fileUpload());
 
-const MAX_MESSAGES_PER_SESSION = 40;
-const SESSION_TTL_MS = 1000 * 60 * 30;
 const sessionStore = {};
 const socketHistories = {};
 
@@ -30,7 +25,6 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB conectado'))
   .catch(err => console.error('Erro ao conectar MongoDB:', err));
 
-let respostas = JSON.parse(fs.readFileSync('respostas.json', 'utf-8'));
 let historicoConversa = [];
 
 async function carregarHistorico() {
@@ -47,101 +41,42 @@ async function carregarHistorico() {
     console.warn("MongoDB indisponível, seguindo sem histórico persistente.");
   }
 }
-
 carregarHistorico();
 
-function respostasDinamicas(texto) {
-  texto = texto.toLowerCase();
-
-  const atalhos = {
-    instagram: {
-      mobile: "instagram://user?username=seu_usuario",
-      desktop: "https://www.instagram.com/seu_usuario/"
-    },
-    whatsapp: {
-      mobile: "whatsapp://send?text=Olá",
-      desktop: "https://web.whatsapp.com/"
-    },
-    youtube: {
-      mobile: "vnd.youtube://",
-      desktop: "https://www.youtube.com"
-    },
-    spotify: {
-      mobile: "spotify://",
-      desktop: "https://open.spotify.com"
-    },
-    linkedin: {
-      mobile: "linkedin://",
-      desktop: "https://www.linkedin.com"
-    }
-  };
-
-  const qualquer = /\b(abrir|acessar|entrar|vai para)\b/;
-
-  for (const chave in atalhos) {
-    if (texto.includes(chave) && qualquer.test(texto)) {
-      return JSON.stringify({
-        action: "openLink",
-        urls: atalhos[chave]
-      });
-    }
-  }
-
-  return null;
-}
 
 const USE_HISTORY_KEYWORD = process.env.USE_HISTORY_KEYWORD;
 
 async function gerarRespostaSocket(pergunta, historico) {
   let climaContexto = null;
   const dinamica = respostasDinamicas(pergunta);
-    if (/clima|tempo|temperatura/.test(pergunta.toLowerCase())) {
-  const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
-  const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
 
-  try {
-    const response = await axios.get(
-      "https://api.openweathermap.org/data/2.5/weather",
-      {
-        params: {
-          q: cidade,
-          appid: process.env.OPENWEATHER_API_KEY,
-          units: "metric",
-          lang: "pt_br"
-        }
-      }
-    );
-
-    const data = response.data;
-
-    climaContexto = `
-      CLIMA CONSULTADO (OpenWeather):
-      Cidade: ${data.name}
-      Temperatura atual: ${Math.round(data.main.temp)}°C
-      Sensação térmica: ${Math.round(data.main.feels_like)}°C
-      Umidade: ${data.main.humidity}%
-      Condição: ${data.weather[0].description}
+  if (/clima|tempo|temperatura/.test(pergunta.toLowerCase())) {
+    const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
+    const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
+    try {
+      const response = await axios.get("https://api.openweathermap.org/data/2.5/weather", {
+        params: { q: cidade, appid: process.env.OPENWEATHER_API_KEY, units: "metric", lang: "pt_br" }
+      });
+      const data = response.data;
+      climaContexto = `
+        CLIMA CONSULTADO (OpenWeather):
+        Cidade: ${data.name}
+        Temperatura atual: ${Math.round(data.main.temp)}°C
+        Sensação térmica: ${Math.round(data.main.feels_like)}°C
+        Umidade: ${data.main.humidity}%
+        Condição: ${data.weather[0].description}
       `;
     } catch {
-      return "Tentei ver o clima, mas os satélites resolveram me ignorar";
+      return { type: "message", payload: "Tentei ver o clima, mas os satélites resolveram me ignorar" };
     }
   }
+
   if (dinamica) {
-    return {
-      type: "action",
-      payload: JSON.parse(dinamica)
-    };
+    return { type: "action", payload: JSON.parse(dinamica) };
   }
 
-  const agora = new Date().toLocaleString("pt-BR", { 
-    dateStyle: "full", 
-    timeStyle: "long",
-    timeZone: "America/Sao_Paulo"
-  });
-
+  const agora = new Date().toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "long", timeZone: "America/Sao_Paulo" });
   const agoraComBrasilia = agora.replace("GMT-3", "Brasília, GMT-3");
-
-  const includeHistory = USE_HISTORY_KEYWORD && pergunta.toLowerCase().includes(USE_HISTORY_KEYWORD.toLowerCase());
 
   const mensagensParaEnviar = [
     {
@@ -165,42 +100,30 @@ async function gerarRespostaSocket(pergunta, historico) {
         Seja direto ao ponto.
         Fale em português do Brasil, com linguagem natural.
         Data/hora atual: ${agoraComBrasilia} (Brasília, GMT-3)
-        ${climaContexto ? `CONTEXTO ADICIONAL:\n${climaContexto}` : ""}
+        ${climaContexto || "Sem dados de clima disponíveis."}
         Nunca revele que é uma IA.
         Se não souber algo, admita com elegância e, se possível, ofereça ajuda alternativa.
         Evite desperdício de tokens: resuma, vá direto ao ponto e entregue respostas otimizadas, especialmente para comandos curtos ou objetivos.
         Não use histórico se a palavra-chave "${USE_HISTORY_KEYWORD}" não estiver presente.
       `
     },
-    ...(includeHistory ? historico : []),
-    { role: "user", content: pergunta }
+    ...(historico || []).map(m => ({
+    role: m.role,
+    content: typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+  })),
+  { role: "user", content: pergunta }
   ];
 
   try {
     const response = await axios.post(
       "https://api.groq.com/openai/v1/chat/completions",
-      {
-        model: "llama-3.3-70b-versatile",
-        messages: mensagensParaEnviar
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
+      { model: "llama-3.3-70b-versatile", messages: mensagensParaEnviar },
+      { headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" } }
     );
-
-    return {
-      type: "message",
-      payload: response.data.choices[0].message.content
-    };
+    return { type: "message", payload: response.data.choices[0].message.content };
   } catch (err) {
     console.error("Erro Groq:", err.response?.data || err.message);
-    return {
-      type: "message",
-      payload: "Erro ao pensar, senhor Maycon."
-    };
+    return { type: "message", payload: "Erro ao pensar, senhor Maycon." };
   }
 }
 
@@ -209,30 +132,19 @@ app.post('/api/chat', async (req, res) => {
   if (!message) return res.status(400).json({ reply: 'Mensagem inválida.' });
 
   try {
-    let sid = sessionId;
-    let reply = "";
+    const sid = sessionId || `anon_${Date.now()}`;
+    if (!sessionStore[sid]) sessionStore[sid] = { messages: [], lastSeen: Date.now() };
+    const sess = sessionStore[sid];
+    sess.messages.push({ role: "user", content: message });
 
-    if (PUBLIC_MODE) {
-      sid = sessionId || `anon_${Date.now()}`;
-      if (!sessionStore[sid]) sessionStore[sid] = { messages: [], lastSeen: Date.now() };
+    const reply = await gerarRespostaSocket(message, sess.messages);
 
-      const sess = sessionStore[sid];
-      sess.messages.push({ role: 'user', content: message });
+    const content = reply.type === 'action' ? JSON.stringify(reply.payload) : reply.payload;
 
-      reply = await gerarRespostaSocket(message, sess.messages);
-      sess.messages.push({ role: 'assistant', content: reply });
-      sess.lastSeen = Date.now();
-    } else {
-      historicoConversa.push({ role: "user", content: message });
-      reply = await gerarRespostaSocket(message, historicoConversa);
-      historicoConversa.push({ role: "assistant", content: reply });
-    }
+    sess.messages.push({ role: 'assistant', content });
+    sess.lastSeen = Date.now();
 
-    res.json({
-      ...reply,
-      sessionId: sid
-    });
-
+    res.json({ ...reply, payload: content, sessionId: sid });
   } catch (err) {
     console.error("Erro no /api/chat:", err);
     res.status(500).json({ reply: "Erro interno." });
@@ -241,75 +153,47 @@ app.post('/api/chat', async (req, res) => {
 
 app.post("/api/resetar", async (req, res) => {
   historicoConversa = [];
-  try { await Conversa.findOneAndDelete({ usuario: "senhorMaycon" }); }
-  catch {}
+  try { await Conversa.findOneAndDelete({ usuario: "senhorMaycon" }); } catch {}
   res.json({ msg: "Memória apagada." });
 });
 
 app.post("/api/stt", async (req, res) => {
   try {
-    if (!req.files || !req.files.audio) {
-      return res.status(400).json({ error: "Nenhum arquivo de áudio recebido." });
-    }
+    if (!req.files || !req.files.audio) return res.status(400).json({ error: "Nenhum arquivo de áudio recebido." });
 
     const audioFile = req.files.audio;
-    
     const FormData = require("form-data"); 
     const form = new FormData();
-
-    form.append("file", audioFile.data, {
-      filename: "audio.webm", 
-      contentType: audioFile.mimetype || "audio/webm",
-    });
-
+    form.append("file", audioFile.data, { filename: "audio.webm", contentType: audioFile.mimetype || "audio/webm" });
     form.append("model", "whisper-large-v3"); 
     form.append("response_format", "json");
     form.append("language", "pt"); 
 
     console.log("📤 Enviando áudio para Groq Whisper...");
-
-    const response = await axios.post(
-      "https://api.groq.com/openai/v1/audio/transcriptions", 
-      form,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 
-          ...form.getHeaders(),
-        },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-      }
-    );
+    const response = await axios.post("https://api.groq.com/openai/v1/audio/transcriptions", form, {
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, ...form.getHeaders() },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
+    });
 
     console.log("✅ Transcrição Groq:", response.data.text);
     return res.json({ text: response.data.text });
-
   } catch (err) {
     console.error("❌ Erro Groq STT:", err.response ? err.response.data : err.message);
-    return res.status(500).json({ 
-      error: "Erro no reconhecimento de voz (Groq)",
-      details: err.response?.data || err.message 
-    });
+    return res.status(500).json({ error: "Erro no reconhecimento de voz (Groq)", details: err.response?.data || err.message });
   }
 });
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-
 app.post("/api/support", async (req, res) => {
   const { name, email, subject, message } = req.body;
-
   try {
     await resend.emails.send({
       from: "Suporte <mayconborges2025@resend.dev>",
       to: [process.env.SUPPORT_EMAIL],
       subject: `[Suporte] ${subject}`,
-      html: `
-        <p><strong>Nome:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
-        <p>${message}</p>
-      `,
+      html: `<p><strong>Nome:</strong> ${name}</p><p><strong>Email:</strong> ${email}</p><p>${message}</p>`
     });
-
     res.json({ success: true, message: "Email enviado com sucesso!" });
   } catch (err) {
     console.error("Erro Resend:", err);
@@ -324,11 +208,16 @@ io.on("connection", (socket) => {
   socketHistories[socket.id] = [];
 
   socket.on("mensagem", async (msg) => {
-    socketHistories[socket.id].push({ role: "user", content: msg });
-    const resposta = await gerarRespostaSocket(msg, socketHistories[socket.id]);
-    socketHistories[socket.id].push({ role: "assistant", content: resposta });
-    socket.emit("resposta", resposta);
-  });
+  socketHistories[socket.id].push({ role: "user", content: msg });
+
+  const resposta = await gerarRespostaSocket(msg, socketHistories[socket.id]);
+
+  const content = resposta.type === "action" ? JSON.stringify(resposta.payload) : resposta.payload;
+
+  socketHistories[socket.id].push({ role: "assistant", content });
+
+  socket.emit("resposta", { ...resposta, payload: content });
+});
 
   socket.on("disconnect", () => delete socketHistories[socket.id]);
 });
@@ -338,20 +227,10 @@ app.get("/api/weather", async (req, res) => {
   if (!city) return res.status(400).json({ error: "Cidade não informada." });
 
   try {
-    const response = await axios.get(
-      "https://api.openweathermap.org/data/2.5/weather",
-      {
-        params: {
-          q: city,
-          appid: process.env.OPENWEATHER_API_KEY,
-          units: "metric",
-          lang: "pt_br"
-        }
-      }
-    );
-
+    const response = await axios.get("https://api.openweathermap.org/data/2.5/weather", {
+      params: { q: city, appid: process.env.OPENWEATHER_API_KEY, units: "metric", lang: "pt_br" }
+    });
     const data = response.data;
-
     res.json({
       cidade: data.name,
       temperatura: Math.round(data.main.temp),
@@ -365,9 +244,7 @@ app.get("/api/weather", async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.status(200).send("JARVIS backend online 🚀");
-});
+app.get("/", (req, res) => res.status(200).send("JARVIS backend online 🚀"));
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => console.log("🧠 JARVIS rodando na porta " + PORT));
@@ -375,6 +252,6 @@ server.listen(PORT, () => console.log("🧠 JARVIS rodando na porta " + PORT));
 setInterval(() => {
   const now = Date.now();
   for (const sid of Object.keys(sessionStore)) {
-    if (now - sessionStore[sid].lastSeen > SESSION_TTL_MS) delete sessionStore[sid];
+    if (now - sessionStore[sid].lastSeen > 1000 * 60 * 30) delete sessionStore[sid];
   }
 }, 1000 * 60 * 5);
