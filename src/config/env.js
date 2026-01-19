@@ -1,6 +1,5 @@
+// src/config/env.js
 require("dotenv").config();
-
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 module.exports = {
   GROQ_API_KEY: process.env.GROQ_API_KEY,
