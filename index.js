@@ -1,4 +1,3 @@
-// Backend principal - index.js
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -7,27 +6,31 @@ const axios = require("axios");
 const { Server } = require('socket.io');
 const fileUpload = require('express-fileupload');
 const FormData = require("form-data");
+const path = require('path');
+const fs = require('fs');
+const { exec, spawn } = require('child_process');
+
+const { GROQ_API_KEY, WEATHER_KEY, PORT } = require("./src/config/env");
+const jarvisLLM = require("./src/ai/jarvis.llm");
 
 const app = express();
-
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 app.use(morgan('dev'));
 app.use(fileUpload());
 
-const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const sessionStore = {};
 const socketHistories = {};
-const {GROQ_API_KEY, WEATHER_KEY, PORT} = require("./src/config/env");
-const jarvisLLM = require("./src/ai/jarvis.llm");
+let tts;
 
+// --- FUNÇÃO DE INTELIGÊNCIA (O que estava faltando) ---
 async function gerarRespostaSocket(pergunta, historico = []) {
     let climaContexto = "Sem dados de clima.";
 
     if (/clima|tempo|temperatura/.test(pergunta.toLowerCase())) {
         const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
         const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
-        try {
+        try {D
             const resWeather = await axios.get(
                 "https://api.openweathermap.org/data/2.5/weather",
                 { params: { q: cidade, appid: WEATHER_KEY, units: "metric", lang: "pt_br" } }
@@ -53,9 +56,65 @@ async function gerarRespostaSocket(pergunta, historico = []) {
     });
 }
 
+async function sintetizarVozLocal(texto) {
+    return new Promise((resolve) => {
+        try {
+            const isWin = process.platform === "win32";
+            
+            // Define a pasta e o executável baseado no sistema
+            const piperDir = isWin 
+                ? path.join(__dirname, 'bin', 'piper') 
+                : path.join(__dirname, 'bin', 'piper_linux');
+                
+            const piperExe = isWin ? 'piper.exe' : './piper';
+            
+            // O Render prefere salvar arquivos temporários na pasta /tmp
+            const outputPath = isWin 
+                ? path.join(__dirname, 'temp_audio.wav')
+                : '/tmp/temp_audio.wav';
+
+            // No Linux, o caminho de saída para o comando precisa ser absoluto
+            const outputArg = isWin ? '../../temp_audio.wav' : outputPath;
+
+            console.log(`🎙️ Iniciando síntese no ${isWin ? 'Windows' : 'Linux'}...`);
+
+            const child = spawn(piperExe, [
+                '--model', 'pt_BR-faber-medium.onnx',
+                '--output_file', outputArg
+            ], { 
+                cwd: piperDir,
+                shell: true 
+            });
+
+            child.stdin.write(texto);
+            child.stdin.end();
+
+            child.on('close', (code) => {
+                if (code === 0 && fs.existsSync(outputPath)) {
+                    const buffer = fs.readFileSync(outputPath);
+                    console.log("✅ Áudio gerado com sucesso!");
+                    resolve(buffer.toString('base64'));
+                } else {
+                    // Se falhar, vamos tentar ver o que o Piper diz
+                    console.error(`❌ Piper falhou. Código: ${code}`);
+                    resolve(null);
+                }
+            });
+
+            child.on('error', (err) => {
+                console.error("❌ Erro ao iniciar processo:", err.message);
+                resolve(null);
+            });
+
+        } catch (err) {
+            console.error("❌ Erro interno:", err);
+            resolve(null);
+        }
+    });
+}
+// --- ROTAS DA API ---
 app.post('/api/chat', async (req, res) => {
     const { message, sessionId } = req.body;
-
     if (!message) return res.status(400).json({ payload: 'O silêncio é ensurdecedor.' });
 
     try {
@@ -66,25 +125,7 @@ app.post('/api/chat', async (req, res) => {
         const responseIA = await gerarRespostaSocket(message, sess.messages);
         const textoFinal = responseIA.payload;
 
-        let audioBase64 = null;
-        try {
-            const tts = new MsEdgeTTS();
-            await tts.setMetadata("pt-BR-AntonioNeural", OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-            const { audioStream } = tts.toStream(textoFinal, {
-                rate: "+12%",
-                pitch: "-6Hz",
-                volume: "+5%"  
-            });
-
-            const chunks = [];
-            audioBase64 = await new Promise((resolve) => {
-                audioStream.on("data", (chunk) => chunks.push(chunk));
-                audioStream.on("end", () => resolve(Buffer.concat(chunks).toString('base64')));
-                audioStream.on("error", () => resolve(null));
-            });
-        } catch (vErr) {
-            console.error("Erro voz integrada:", vErr.message);
-        }
+        const audioBase64 = await sintetizarVozLocal(textoFinal);
 
         sess.messages.push({ role: "user", content: message });
         sess.messages.push({ role: 'assistant', content: textoFinal });
@@ -106,19 +147,9 @@ app.post('/api/chat', async (req, res) => {
 app.post('/api/speak', async (req, res) => {
     const { text } = req.body;
     if (!text) return res.status(400).send('Sem texto');
-    try {
-        const tts = new MsEdgeTTS();
-        await tts.setMetadata("pt-BR-AntonioNeural", OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-        const { audioStream } = tts.toStream(text);
-        const chunks = [];
-        audioStream.on("data", (chunk) => chunks.push(chunk));
-        audioStream.on("end", () => {
-            const audioBase64 = Buffer.concat(chunks).toString('base64');
-            res.json({ audioBase64 });
-        });
-    } catch (err) {
-        res.status(500).json({ error: "Erro no TTS isolado" });
-    }
+    const audioBase64 = await sintetizarVozLocal(text);
+    if (audioBase64) res.json({ audioBase64 });
+    else res.status(500).json({ error: "Erro voz local" });
 });
 
 app.post("/api/stt", async (req, res) => {
@@ -137,20 +168,9 @@ app.post("/api/stt", async (req, res) => {
     }
 });
 
-app.get("/api/weather", async (req, res) => {
-    const { city } = req.query;
-    try {
-        const response = await axios.get("https://api.openweathermap.org/data/2.5/weather", {
-            params: { q: city || "Brasília", appid: WEATHER_KEY, units: "metric", lang: "pt_br" }
-        });
-        res.json(response.data);
-    } catch (err) {
-        res.status(500).json({ error: "Clima offline." });
-    }
-});
-
 app.get("/", (req, res) => res.send("Sistemas Online, senhor."));
 
+// --- SERVER & SOCKET ---
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
@@ -164,10 +184,11 @@ io.on("connection", (socket) => {
         socket.emit("resposta", { ...resposta, payload: content });
     });
     socket.on("disconnect", () => delete socketHistories[socket.id]);
-
 });
+
 server.listen(PORT, () => console.log(`🚀 JARVIS Ativo na porta ${PORT}`));
 
+// Limpeza de sessões
 setInterval(() => {
     const now = Date.now();
     Object.keys(sessionStore).forEach(sid => {

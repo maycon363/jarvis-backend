@@ -1,4 +1,5 @@
-const pgClient = require("../services/database");
+// src/services/memory.service.js
+const pgClient = require("./database");
 
 async function salvarNoHistorico(role, content) {
   const query =
