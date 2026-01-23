@@ -23,7 +23,6 @@ const sessionStore = {};
 const socketHistories = {};
 let tts;
 
-// --- FUNÇÃO DE INTELIGÊNCIA (O que estava faltando) ---
 async function gerarRespostaSocket(pergunta, historico = []) {
     let climaContexto = "Sem dados de clima.";
 
@@ -61,19 +60,16 @@ async function sintetizarVozLocal(texto) {
         try {
             const isWin = process.platform === "win32";
             
-            // Define a pasta e o executável baseado no sistema
             const piperDir = isWin 
                 ? path.join(__dirname, 'bin', 'piper') 
                 : path.join(__dirname, 'bin', 'piper_linux');
                 
             const piperExe = isWin ? 'piper.exe' : './piper';
             
-            // O Render prefere salvar arquivos temporários na pasta /tmp
             const outputPath = isWin 
                 ? path.join(__dirname, 'temp_audio.wav')
                 : '/tmp/temp_audio.wav';
 
-            // No Linux, o caminho de saída para o comando precisa ser absoluto
             const outputArg = isWin ? '../../temp_audio.wav' : outputPath;
 
             console.log(`🎙️ Iniciando síntese no ${isWin ? 'Windows' : 'Linux'}...`);
@@ -83,19 +79,25 @@ async function sintetizarVozLocal(texto) {
                 '--output_file', outputArg
             ], { 
                 cwd: piperDir,
-                shell: true 
+                shell: isWin 
             });
 
             child.stdin.write(texto);
             child.stdin.end();
 
+            child.stderr.on('data', (data) => {
+                console.log(`Piper Log: ${data}`);
+            });
+
             child.on('close', (code) => {
                 if (code === 0 && fs.existsSync(outputPath)) {
                     const buffer = fs.readFileSync(outputPath);
                     console.log("✅ Áudio gerado com sucesso!");
+                    
+                    if (!isWin) fs.unlinkSync(outputPath); 
+                    
                     resolve(buffer.toString('base64'));
                 } else {
-                    // Se falhar, vamos tentar ver o que o Piper diz
                     console.error(`❌ Piper falhou. Código: ${code}`);
                     resolve(null);
                 }
@@ -112,7 +114,7 @@ async function sintetizarVozLocal(texto) {
         }
     });
 }
-// --- ROTAS DA API ---
+
 app.post('/api/chat', async (req, res) => {
     const { message, sessionId } = req.body;
     if (!message) return res.status(400).json({ payload: 'O silêncio é ensurdecedor.' });
@@ -170,7 +172,6 @@ app.post("/api/stt", async (req, res) => {
 
 app.get("/", (req, res) => res.send("Sistemas Online, senhor."));
 
-// --- SERVER & SOCKET ---
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
