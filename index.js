@@ -24,34 +24,50 @@ const socketHistories = {};
 let tts;
 
 async function gerarRespostaSocket(pergunta, historico = []) {
-    let climaContexto = "Sem dados de clima.";
+    let climaContexto = "Senhor, os sensores de clima não foram acionados para esta pergunta.";
+    const precisaClima = /clima|tempo|temperatura|dia|lá fora|chovendo|sol|calor|frio/i.test(pergunta.toLowerCase());
 
-    if (/clima|tempo|temperatura/.test(pergunta.toLowerCase())) {
+    if (precisaClima) {
         const cidadeMatch = pergunta.match(/em\s+([a-zA-ZÀ-ú\s]+)/i);
-        const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília";
-        try {D
+        const cidade = cidadeMatch ? cidadeMatch[1].trim() : "Brasília"; 
+
+        try {
+            console.log(`☁️ Buscando clima para: ${cidade}...`);
             const resWeather = await axios.get(
                 "https://api.openweathermap.org/data/2.5/weather",
-                { params: { q: cidade, appid: WEATHER_KEY, units: "metric", lang: "pt_br" } }
+                { 
+                    params: { 
+                        q: cidade, 
+                        appid: WEATHER_KEY, 
+                        units: "metric", 
+                        lang: "pt_br" 
+                    },
+                    timeout: 5000 // Evita que o Jarvis trave se a API de clima demorar
+                }
             );
+
             const d = resWeather.data;
-            climaContexto = `CLIMA EM ${d.name}: ${Math.round(d.main.temp)}°C, ${d.weather[0].description}. Umidade: ${d.main.humidity}%`;
-        } catch {
-            climaContexto = "Não consegui acessar os satélites de clima no momento.";
+            climaContexto = `DADOS METEOROLÓGICOS ATUALIZADOS: Em ${d.name}, faz ${Math.round(d.main.temp)}°C com ${d.weather[0].description}. A umidade relativa do ar está em ${d.main.humidity}% e ventos de ${d.wind.speed}km/h.`;
+            console.log("✅ Clima obtido com sucesso.");
+            
+        } catch (error) {
+            console.error("❌ Erro na API de Clima:", error.message);
+            climaContexto = "Senhor, houve uma falha na conexão com os satélites meteorológicos.";
+            // Você pode forçar um campo de erro na resposta global se quiser
         }
     }
 
-    const agora = new Date().toLocaleString("pt-BR", {
+    const agoraReal = new Date().toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo",
         dateStyle: "full",
-        timeStyle: "long",
-        timeZone: "America/Sao_Paulo"
+        timeStyle: "short"
     });
 
     return await jarvisLLM({
         pergunta,
         historico,
         climaContexto,
-        agora
+        agora: agoraReal
     });
 }
 
@@ -59,24 +75,27 @@ async function sintetizarVozLocal(texto) {
     return new Promise((resolve) => {
         try {
             const isWin = process.platform === "win32";
-            
-            const piperDir = isWin 
-                ? path.join(__dirname, 'bin', 'piper') 
-                : path.join(__dirname, 'bin', 'piper_linux');
-                
+            const binFolder = isWin ? 'piper' : 'piper_linux';
+            const piperDir = path.join(__dirname, 'bin', binFolder);
             const piperExe = isWin ? 'piper.exe' : './piper';
+            
+            // Caminho absoluto para o modelo
+            const modelPath = path.join(piperDir, 'pt_BR-faber-medium.onnx');
             
             const outputPath = isWin 
                 ? path.join(__dirname, 'temp_audio.wav')
                 : '/tmp/temp_audio.wav';
 
-            const outputArg = isWin ? '../../temp_audio.wav' : outputPath;
+            console.log(`🎙️ Iniciando síntese: ${texto.substring(0, 20)}...`);
 
-            console.log(`🎙️ Iniciando síntese no ${isWin ? 'Windows' : 'Linux'}...`);
+            // No Linux, precisamos garantir que o executável tem permissão
+            if (!isWin) {
+                try { fs.chmodSync(path.join(piperDir, 'piper'), '755'); } catch (e) {}
+            }
 
             const child = spawn(piperExe, [
-                '--model', 'pt_BR-faber-medium.onnx',
-                '--output_file', outputArg
+                '--model', modelPath, // Use o caminho completo do modelo
+                '--output_file', outputPath
             ], { 
                 cwd: piperDir,
                 shell: isWin 
@@ -85,18 +104,13 @@ async function sintetizarVozLocal(texto) {
             child.stdin.write(texto);
             child.stdin.end();
 
-            child.stderr.on('data', (data) => {
-                console.log(`Piper Log: ${data}`);
-            });
-
             child.on('close', (code) => {
                 if (code === 0 && fs.existsSync(outputPath)) {
                     const buffer = fs.readFileSync(outputPath);
-                    console.log("✅ Áudio gerado com sucesso!");
-                    
-                    if (!isWin) fs.unlinkSync(outputPath); 
-                    
-                    resolve(buffer.toString('base64'));
+                    const base64 = buffer.toString('base64');
+                    // Limpeza
+                    try { fs.unlinkSync(outputPath); } catch (e) {}
+                    resolve(base64);
                 } else {
                     console.error(`❌ Piper falhou. Código: ${code}`);
                     resolve(null);
@@ -104,12 +118,11 @@ async function sintetizarVozLocal(texto) {
             });
 
             child.on('error', (err) => {
-                console.error("❌ Erro ao iniciar processo:", err.message);
+                console.error("❌ Erro ao disparar Piper:", err);
                 resolve(null);
             });
-
         } catch (err) {
-            console.error("❌ Erro interno:", err);
+            console.error("❌ Erro interno Voz:", err);
             resolve(null);
         }
     });
@@ -189,7 +202,6 @@ io.on("connection", (socket) => {
 
 server.listen(PORT, () => console.log(`🚀 JARVIS Ativo na porta ${PORT}`));
 
-// Limpeza de sessões
 setInterval(() => {
     const now = Date.now();
     Object.keys(sessionStore).forEach(sid => {

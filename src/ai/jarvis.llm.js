@@ -30,7 +30,7 @@ function formatarDataExtenso(dataISO) {
 
 module.exports = async function jarvisLLM({pergunta, climaContexto, agora}) {
     try {
-        const historico = await obterHistorico(80);
+        const historico = await obterHistorico(10);
 
         const mensagens = [
             gerarPromptBase({ agora, climaContexto }),
