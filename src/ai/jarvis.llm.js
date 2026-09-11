@@ -61,7 +61,7 @@ function extrairToolCallDoTexto(content) {
 // ─── Pesquisa web ─────────────────────────────────────────────────────────────
 
 async function pesquisarWeb(termo) {
-  console.log(`🔍 Pesquisando: "${termo}"`);
+  console.log(`Pesquisando: "${termo}"`);
 
   // Tentativa 1: Tavily
   try {
@@ -94,7 +94,7 @@ async function pesquisarWeb(termo) {
       .substring(0, 4000);
 
   } catch (err) {
-    console.error('❌ Tavily falhou:', err.message);
+    console.error('Tavily falhou:', err.message);
   }
 
   // Tentativa 2: DuckDuckGo
@@ -106,7 +106,7 @@ async function pesquisarWeb(termo) {
     const texto = data.AbstractText || data.Answer || '';
     if (texto) return `Fonte alternativa (DuckDuckGo): ${texto}`;
   } catch (err) {
-    console.error('❌ DuckDuckGo fallback falhou:', err.message);
+    console.error('DuckDuckGo fallback falhou:', err.message);
   }
 
   return 'Senhor, os canais de busca estão temporariamente indisponíveis.';
@@ -181,12 +181,14 @@ async function chamarGroq(mensagens, usarTools = true, tentativa = 1) {
       messages:    mensagens,
       temperature: 0.6,
       max_tokens:  800, // Reduzido: respostas mais concisas por padrão
+      tools:       TOOLS,
+      // Sempre manda o schema de tools (mesmo quando não deve usar) — assim
+      // o modelo continua "ciente" delas e obedece tool_choice: 'none'
+      // corretamente. Omitir `tools` de vez faz o modelo, vendo tool_calls
+      // anteriores na conversa, tentar chamar ferramenta de novo por hábito
+      // — e o Groq rejeita porque não recebeu schema nenhum pra validar.
+      tool_choice: usarTools ? 'auto' : 'none',
     };
-
-    if (usarTools) {
-      body.tools       = TOOLS;
-      body.tool_choice = 'auto';
-    }
 
     const { data } = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -204,12 +206,12 @@ async function chamarGroq(mensagens, usarTools = true, tentativa = 1) {
 
     if ((status === 429 || status >= 500) && tentativa < 3) {
       const espera = tentativa * 2_000;
-      console.warn(`⚠️ Groq ${status} — aguardando ${espera}ms (tentativa ${tentativa})...`);
+      console.warn(`Groq ${status} — aguardando ${espera}ms (tentativa ${tentativa})...`);
       await new Promise(r => setTimeout(r, espera));
       return chamarGroq(mensagens, usarTools, tentativa + 1);
     }
 
-    console.error('❌ Groq erro:', err.response?.data ?? err.message);
+    console.error('Groq erro:', err.response?.data ?? err.message);
     throw err;
   }
 }
@@ -274,6 +276,8 @@ function normalizarHistorico(historicoBruto) {
 
 // ─── Função principal ─────────────────────────────────────────────────────────
 
+const MAX_TOOL_ROUNDS = 3; // até 3 chamadas de ferramenta em sequência por turno
+
 module.exports = async function jarvisLLM({
   pergunta,
   historico:    historicoParam    = [],
@@ -284,103 +288,72 @@ module.exports = async function jarvisLLM({
   let novoCompromissoCriado = null;
 
   try {
-    // 1. Histórico vem inteiramente do que o cliente mandou (localStorage).
     const historicoFinal = normalizarHistorico(historicoParam);
 
-    // 2. Monta mensagens base com anti-leak antes da pergunta do usuário
-    const mensagensBase = [
+    let mensagens = [
       gerarPromptBase({ agora, climaContexto }),
       ANTI_LEAK_REMINDER,
       ...historicoFinal,
       { role: 'user', content: pergunta },
     ];
 
-    // 3. Primeira chamada ao Groq
-    const choice = await chamarGroq(mensagensBase, true);
     let respostaFinal = null;
 
-    // 4a. Tool call via campo correto (tool_calls) ─────────────────────────
-    if (choice.tool_calls?.length > 0) {
-      const call = choice.tool_calls[0];
+    for (let rodada = 0; rodada <= MAX_TOOL_ROUNDS; rodada++) {
+      // Na última rodada permitida, não oferece mais ferramentas — força
+      // uma resposta em texto de qualquer forma que estiver.
+      const podeUsarTool = rodada < MAX_TOOL_ROUNDS;
+      const choice = await chamarGroq(mensagens, podeUsarTool);
 
-      let args = {};
-      try {
-        args = JSON.parse(call.function.arguments || '{}');
-      } catch {
-        console.error('❌ Falha ao parsear argumentos da tool:', call.function.arguments);
+      // Tool call via campo correto ──────────────────────────────────────
+      let toolCall = choice.tool_calls?.[0]
+        ? { id: choice.tool_calls[0].id, name: choice.tool_calls[0].function.name, args: safeParseJSON(choice.tool_calls[0].function.arguments) }
+        : null;
+
+      // Fallback: tool call vazada como texto ─────────────────────────────
+      if (!toolCall && choice.content) {
+        const leaked = extrairToolCallDoTexto(choice.content);
+        if (leaked) {
+          console.warn(`Tool call vazou como texto: ${leaked.name}`, leaked.args);
+          toolCall = { id: `call_recovered_${Date.now()}`, name: leaked.name, args: leaked.args };
+        }
       }
 
-      console.log(`🔧 Tool (tool_calls): ${call.function.name}`, args);
-      const { resultado: toolResult, novoCompromisso } = await executarTool(
-        call.function.name,
-        args,
-        compromissosParam
-      );
-      if (novoCompromisso) novoCompromissoCriado = novoCompromisso;
+      if (toolCall && podeUsarTool) {
+        console.log(`Tool: ${toolCall.name}`, toolCall.args);
 
-      const mensagensComTool = [
-        ...mensagensBase,
-        {
-          // Inclui o objeto choice inteiro para preservar tool_calls
-          role:       'assistant',
-          content:    choice.content ?? null,
-          tool_calls: choice.tool_calls,
-        },
-        {
-          role:         'tool',
-          tool_call_id: call.id,
-          name:         call.function.name,
-          content:      toolResult || 'Sem resultado.',
-        },
-      ];
+        const { resultado: toolResult, novoCompromisso } = await executarTool(
+          toolCall.name,
+          toolCall.args,
+          compromissosParam
+        );
+        if (novoCompromisso) novoCompromissoCriado = novoCompromisso;
 
-      const choiceFinal = await chamarGroq(mensagensComTool, false);
-      respostaFinal = sanitizarResposta(choiceFinal.content?.trim());
+        mensagens = [
+          ...mensagens,
+          {
+            role:       'assistant',
+            content:    choice.content ?? null,
+            tool_calls: [{ id: toolCall.id, type: 'function', function: { name: toolCall.name, arguments: JSON.stringify(toolCall.args) } }],
+          },
+          {
+            role:         'tool',
+            tool_call_id: toolCall.id,
+            name:         toolCall.name,
+            content:      toolResult || 'Sem resultado.',
+          },
+        ];
 
-    // 4b. Tool call vazou como texto (bug do LLM) — fallback de recuperação
-    } else if (choice.content && extrairToolCallDoTexto(choice.content)) {
-      const leaked = extrairToolCallDoTexto(choice.content);
-      console.warn(`⚠️ Tool call vazou como texto: ${leaked.name}`, leaked.args);
+        continue; // próxima rodada: deixa o modelo decidir se quer outra ferramenta ou já responder
+      }
 
-      const { resultado: toolResult, novoCompromisso } = await executarTool(
-        leaked.name,
-        leaked.args,
-        compromissosParam
-      );
-      if (novoCompromisso) novoCompromissoCriado = novoCompromisso;
-
-      const callId = `call_recovered_${Date.now()}`;
-
-      const mensagensComTool = [
-        ...mensagensBase,
-        {
-          role:    'assistant',
-          content: null,
-          tool_calls: [{
-            id:   callId,
-            type: 'function',
-            function: {
-              name:      leaked.name,
-              arguments: JSON.stringify(leaked.args),
-            },
-          }],
-        },
-        {
-          role:         'tool',
-          tool_call_id: callId,
-          name:         leaked.name,
-          content:      toolResult || 'Sem resultado.',
-        },
-      ];
-
-      const choiceFinal = await chamarGroq(mensagensComTool, false);
-      respostaFinal = sanitizarResposta(choiceFinal.content?.trim());
+      // Sem tool call (ou já esgotou as rodadas) — essa é a resposta final.
+      respostaFinal = sanitizarResposta(choice.content?.trim()) || null;
+      break;
     }
 
-    // 5. Sem tool call — resposta direta
     if (!respostaFinal) {
-      respostaFinal = sanitizarResposta(choice.content?.trim())
-        || 'Senhor, houve um erro no processamento.';
+      respostaFinal = 'Senhor, houve um erro no processamento.';
     }
 
     return {
@@ -390,7 +363,7 @@ module.exports = async function jarvisLLM({
     };
 
   } catch (err) {
-    console.error('❌ Erro no JARVIS LLM:', err.response?.data ?? err.message);
+    console.error('Erro no JARVIS LLM:', err.response?.data ?? err.message);
     return {
       payload:        'Senhor, os protocolos principais falharam. Sistemas em diagnóstico.',
       type:           'message',
@@ -398,3 +371,7 @@ module.exports = async function jarvisLLM({
     };
   }
 };
+
+function safeParseJSON(str) {
+  try { return JSON.parse(str || '{}'); } catch { return {}; }
+}
